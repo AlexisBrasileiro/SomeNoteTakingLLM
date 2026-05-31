@@ -2,6 +2,7 @@
 import { useEffect } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { SetupProvider, useSetup } from './context/SetupContext'
+import { SidebarRefreshProvider } from './context/SidebarRefreshContext'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import NotesPage from './pages/NotesPage'
@@ -66,9 +67,11 @@ export default function App() {
   return (
     <AuthProvider>
       <SetupProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <SidebarRefreshProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </SidebarRefreshProvider>
       </SetupProvider>
     </AuthProvider>
   )

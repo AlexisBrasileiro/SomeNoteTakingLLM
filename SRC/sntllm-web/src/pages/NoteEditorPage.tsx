@@ -5,6 +5,7 @@ import api from '../api/client'
 import AppLayout from '../components/AppLayout'
 import PaperlessDocumentsPanel from '../components/PaperlessDocumentsPanel'
 import type { Project, Note, NoteType } from '../types'
+import { useSidebarRefresh } from '../context/SidebarRefreshContext'
 
 const NOTE_TYPE_LABELS: Record<number, string> = {
   0: '📝 Nota Livre',
@@ -19,6 +20,7 @@ export default function NoteEditorPage() {
   const location = useLocation()
   const navState = (location.state as { projectId?: string; noteType?: NoteType; date?: string } | null)
   const presetProjectId = navState?.projectId ?? ''
+  const { refresh: refreshSidebar } = useSidebarRefresh()
 
   const todayIso = new Date().toISOString().split('T')[0]
 
@@ -70,9 +72,11 @@ export default function NoteEditorPage() {
       }
       if (isNew) {
         const r = await api.post<Note>('/notes', payload)
+        refreshSidebar()
         navigate(`/notes/${r.data.id}`, { replace: true })
       } else {
         await api.put(`/notes/${id}`, payload)
+        refreshSidebar()
       }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } }
@@ -87,6 +91,7 @@ export default function NoteEditorPage() {
     if (!window.confirm('Excluir esta nota?')) return
     try {
       await api.delete(`/notes/${id}`)
+      refreshSidebar()
       navigate('/')
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } }

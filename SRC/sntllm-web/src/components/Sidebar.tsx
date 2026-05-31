@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from 'react'
+﻿import { useEffect, useState, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useSidebarRefresh } from '../context/SidebarRefreshContext'
 import api from '../api/client'
 import type { Project, Note, NoteType } from '../types'
 
@@ -37,7 +38,6 @@ interface CalMonth { key: string; label: string; days: CalDay[] }
 interface CalYear  { year: string; months: CalMonth[] }
 
 function buildCalendar(notes: Note[]): CalYear[] {
-  // Separar containers de dia das notas-filhas
   const containers = notes.filter(n => isCalendarContainer(n))
   const childrenById = new Map<string, Note[]>()
   for (const n of notes) {
@@ -48,7 +48,6 @@ function buildCalendar(notes: Note[]): CalYear[] {
     }
   }
 
-  // Notas-filhas que ficaram órfãs (sem container correspondente) — compatibilidade com dados antigos
   const containerIds = new Set(containers.map(c => c.id))
   const orphans = notes.filter(n =>
     !isCalendarContainer(n) &&
@@ -56,7 +55,6 @@ function buildCalendar(notes: Note[]): CalYear[] {
     (!n.parentNoteId || !containerIds.has(n.parentNoteId))
   )
 
-  // Agrupar por ano/mês/dia
   const map = new Map<string, Map<string, Map<string, { container: Note | null; children: Note[] }>>>()
 
   const addDay = (dk: string, y: string, mk: string, container: Note | null, children: Note[]) => {
@@ -122,6 +120,20 @@ function defaultProjState(): ProjState {
   return { open: false, sections: { free: true, cal: false, docs: false, chat: false }, years: {}, months: {}, days: {}, noteOpen: {} }
 }
 
+const UNASSIGNED_ID = '__unassigned__'
+
+// ── drag handlers interface ───────────────────────────────────────────────────
+
+interface DragHandlers {
+  dragNoteId: string | null
+  dropTarget: string | null
+  onDragStart: (noteId: string) => void
+  onDragEnd: () => void
+  onDropOnNote: (targetNoteId: string, targetProjectId: string | null, e: React.DragEvent) => void
+  onDragOverNote: (targetId: string, e: React.DragEvent) => void
+  onDragLeave: () => void
+}
+
 // ── sub-components ────────────────────────────────────────────────────────────
 
 function SectionHeader({ icon, label, count, open, onClick }: {
@@ -137,21 +149,37 @@ function SectionHeader({ icon, label, count, open, onClick }: {
   )
 }
 
-function NoteRow({ note, indent, noteOpen, onToggle }: {
+function NoteRow({ note, indent, noteOpen, onToggle, dragHandlers }: {
   note: NoteWithChildren
   indent: number
   noteOpen: Record<string, boolean>
   onToggle: (id: string) => void
+  dragHandlers?: DragHandlers
 }) {
   const navigate = useNavigate()
   const location = useLocation()
   const isActive = location.pathname === `/notes/${note.id}`
   const open = !!noteOpen[note.id]
+  const dh = dragHandlers
+  const isDragging = dh?.dragNoteId === note.id
+  const isDropTarget = dh?.dropTarget === `note:${note.id}`
   return (
     <div>
       <div
-        style={{ ...s.row, paddingLeft: indent, background: isActive ? '#312e81' : undefined }}
+        draggable={!!dh}
+        style={{
+          ...s.row,
+          paddingLeft: indent,
+          background: isActive ? '#312e81' : undefined,
+          opacity: isDragging ? 0.4 : 1,
+          outline: isDropTarget ? '1px solid #6366f1' : undefined,
+        }}
         onClick={() => navigate(`/notes/${note.id}`)}
+        onDragStart={dh ? e => { e.dataTransfer.setData('noteId', note.id); dh.onDragStart(note.id) } : undefined}
+        onDragEnd={dh ? () => dh.onDragEnd() : undefined}
+        onDragOver={dh ? e => { e.preventDefault(); e.stopPropagation(); dh.onDragOverNote(`note:${note.id}`, e) } : undefined}
+        onDragLeave={dh ? () => dh.onDragLeave() : undefined}
+        onDrop={dh ? e => dh.onDropOnNote(note.id, note.projectId ?? null, e) : undefined}
       >
         {note.children.length > 0
           ? <span style={s.chevron} onClick={e => { e.stopPropagation(); onToggle(note.id) }}>{open ? '▾' : '▸'}</span>
@@ -162,20 +190,30 @@ function NoteRow({ note, indent, noteOpen, onToggle }: {
         </span>
       </div>
       {open && note.children.map(c => (
-        <NoteRow key={c.id} note={c} indent={indent + 12} noteOpen={noteOpen} onToggle={onToggle} />
+        <NoteRow key={c.id} note={c} indent={indent + 12} noteOpen={noteOpen} onToggle={onToggle} dragHandlers={dragHandlers} />
       ))}
     </div>
   )
 }
 
-function CalNoteRow({ note }: { note: Note }) {
+function CalNoteRow({ note, dragHandlers }: { note: Note; dragHandlers?: DragHandlers }) {
   const navigate = useNavigate()
   const location = useLocation()
   const isActive = location.pathname === `/notes/${note.id}`
+  const dh = dragHandlers
+  const isDragging = dh?.dragNoteId === note.id
   return (
     <div
-      style={{ ...s.row, paddingLeft: 72, background: isActive ? '#312e81' : undefined }}
+      draggable={!!dh}
+      style={{
+        ...s.row,
+        paddingLeft: 72,
+        background: isActive ? '#312e81' : undefined,
+        opacity: isDragging ? 0.4 : 1,
+      }}
       onClick={() => navigate(`/notes/${note.id}`)}
+      onDragStart={dh ? e => { e.dataTransfer.setData('noteId', note.id); dh.onDragStart(note.id) } : undefined}
+      onDragEnd={dh ? () => dh.onDragEnd() : undefined}
     >
       <span style={s.gap} />
       <span style={s.icon}>📄</span>
@@ -186,25 +224,37 @@ function CalNoteRow({ note }: { note: Note }) {
   )
 }
 
-function CalDayRow({ day, isOpen, onToggle }: {
+function CalDayRow({ day, isOpen, onToggle, dragHandlers }: {
   day: { dateKey: string; label: string; container: Note | null; children: Note[] }
   isOpen: boolean
   onToggle: () => void
+  dragHandlers?: DragHandlers
 }) {
   const navigate = useNavigate()
   const location = useLocation()
   const isActive = day.container ? location.pathname === `/notes/${day.container.id}` : false
   const hasChildren = day.children.length > 0
+  const dh = dragHandlers
+  const isDragging = day.container ? dh?.dragNoteId === day.container.id : false
 
   return (
     <div>
       {/* L4: Dia — clicável se tiver nota-container */}
       <div
-        style={{ ...s.row, paddingLeft: 60, background: isActive ? '#312e81' : undefined, cursor: 'pointer' }}
+        draggable={!!(dh && day.container)}
+        style={{
+          ...s.row,
+          paddingLeft: 60,
+          background: isActive ? '#312e81' : undefined,
+          cursor: 'pointer',
+          opacity: isDragging ? 0.4 : 1,
+        }}
         onClick={() => {
           if (hasChildren) onToggle()
           if (day.container) navigate(`/notes/${day.container.id}`)
         }}
+        onDragStart={dh && day.container ? e => { e.dataTransfer.setData('noteId', day.container!.id); dh.onDragStart(day.container!.id) } : undefined}
+        onDragEnd={dh ? () => dh.onDragEnd() : undefined}
       >
         {hasChildren
           ? <span style={s.chevron} onClick={e => { e.stopPropagation(); onToggle() }}>{isOpen ? '▾' : '▸'}</span>
@@ -218,7 +268,7 @@ function CalDayRow({ day, isOpen, onToggle }: {
         )}
       </div>
       {/* L5: filhos */}
-      {isOpen && day.children.map(n => <CalNoteRow key={n.id} note={n} />)}
+      {isOpen && day.children.map(n => <CalNoteRow key={n.id} note={n} dragHandlers={dragHandlers} />)}
     </div>
   )
 }
@@ -248,7 +298,6 @@ function MiniCalendar({ notes }: { notes: Note[] }) {
   const today = new Date()
   const [view, setView] = useState({ year: today.getFullYear(), month: today.getMonth() })
 
-  // Build per-day counts (children only, not containers) and container map
   const dateCounts    = new Map<string, number>()
   const dateContainer = new Map<string, Note>()
 
@@ -353,16 +402,99 @@ function MiniCalendar({ notes }: { notes: Note[] }) {
 export default function Sidebar() {
   const { user: authUser, logout: doLogout } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const { version, refresh: refreshCtx } = useSidebarRefresh()
   const [projects, setProjects] = useState<Project[]>([])
   const [notes, setNotes] = useState<Note[]>([])
   const [states, setStates] = useState<Record<string, ProjState>>({})
+  const [dragNoteId, setDragNoteId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+
+  const todayIso = new Date().toISOString().split('T')[0]
 
   const refresh = useCallback(() => {
     api.get<Project[]>('/projects').then(r => setProjects(r.data)).catch(() => {})
     api.get<Note[]>('/notes').then(r => setNotes(r.data)).catch(() => {})
   }, [])
 
-  useEffect(() => { refresh() }, [refresh])
+  useEffect(() => { refresh() }, [refresh, version])
+
+  // Auto-expand tree to active note
+  useEffect(() => {
+    const match = location.pathname.match(/^\/notes\/(.+)$/)
+    if (!match) return
+    const activeId = match[1]
+    if (activeId === 'new') return
+    const note = notes.find(n => n.id === activeId)
+    if (!note) return
+    const pid = note.projectId ?? UNASSIGNED_ID
+
+    setActiveProjectId(note.projectId ?? null)
+
+    setStates(prev => {
+      const cur = prev[pid] ?? defaultProjState()
+      let newState = { ...cur, open: true }
+
+      if (note.noteType === 1) {
+        newState.sections = { ...newState.sections, cal: true }
+        if (note.noteDate) {
+          const d = new Date(note.noteDate)
+          const y = d.getFullYear().toString()
+          const mk = `${y}-${String(d.getMonth()+1).padStart(2,'0')}`
+          const dk = `${mk}-${String(d.getDate()).padStart(2,'0')}`
+          newState.years = { ...newState.years, [y]: true }
+          newState.months = { ...newState.months, [mk]: true }
+          newState.days = { ...newState.days, [dk]: true }
+        }
+      } else if (note.noteType === 0) {
+        newState.sections = { ...newState.sections, free: true }
+        let cur2 = note
+        const toOpen: string[] = []
+        while (cur2.parentNoteId) {
+          toOpen.push(cur2.parentNoteId)
+          const found = notes.find(n => n.id === cur2.parentNoteId)
+          if (!found || found.id === note.id) break
+          cur2 = found
+        }
+        const newNoteOpen = { ...newState.noteOpen }
+        toOpen.forEach(id => { newNoteOpen[id] = true })
+        newState.noteOpen = newNoteOpen
+      } else if (note.noteType === 2) {
+        newState.sections = { ...newState.sections, docs: true }
+      } else if (note.noteType === 3) {
+        newState.sections = { ...newState.sections, chat: true }
+      }
+
+      return { ...prev, [pid]: newState }
+    })
+  }, [location.pathname, notes])
+
+  async function moveNote(noteId: string, projectId: string | null, parentNoteId: string | null) {
+    await api.patch(`/notes/${noteId}/move`, { projectId, parentNoteId })
+    refresh()
+    refreshCtx()
+  }
+
+  const dragHandlers: DragHandlers = {
+    dragNoteId,
+    dropTarget,
+    onDragStart: (noteId) => setDragNoteId(noteId),
+    onDragEnd: () => setDragNoteId(null),
+    onDropOnNote: (targetNoteId, targetProjectId, e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const nid = e.dataTransfer.getData('noteId')
+      if (nid && nid !== targetNoteId) {
+        void moveNote(nid, targetProjectId, targetNoteId)
+      }
+      setDropTarget(null)
+    },
+    onDragOverNote: (targetId, _e) => {
+      setDropTarget(targetId)
+    },
+    onDragLeave: () => setDropTarget(null),
+  }
 
   function upd(pid: string, fn: (cur: ProjState) => ProjState) {
     setStates(prev => ({ ...prev, [pid]: fn(prev[pid] ?? defaultProjState()) }))
@@ -382,6 +514,104 @@ export default function Sidebar() {
   const byType = (pid: string, type: NoteType) =>
     notes.filter(n => n.projectId === pid && n.noteType === type)
 
+  const byTypeUnassigned = (type: NoteType) =>
+    notes.filter(n => !n.projectId && n.noteType === type)
+
+  function renderProjectContent(pid: string, free: Note[], cal: Note[], docs: Note[], chats: Note[]) {
+    const st = states[pid] ?? defaultProjState()
+    return (
+      <div>
+        {/* L1: Notas Livres */}
+        <SectionHeader
+          icon="📝" label="Notas Livres" count={free.length}
+          open={st.sections.free} onClick={() => toggleSection(pid, 'free')}
+        />
+        {st.sections.free && (
+          free.length === 0
+            ? <div style={{ ...s.hint, paddingLeft: 36 }}>Nenhuma nota livre</div>
+            : buildTree(free).map(n => (
+                <NoteRow key={n.id} note={n} indent={36}
+                  noteOpen={st.noteOpen} onToggle={nid => toggleNote(pid, nid)}
+                  dragHandlers={dragHandlers} />
+              ))
+        )}
+
+        {/* L1: Notas de Calendário */}
+        <SectionHeader
+          icon="📅" label="Notas de Calendário" count={cal.length}
+          open={st.sections.cal} onClick={() => toggleSection(pid, 'cal')}
+        />
+        {st.sections.cal && (
+          cal.length === 0
+            ? <div style={{ ...s.hint, paddingLeft: 36 }}>Nenhuma nota de calendário</div>
+            : buildCalendar(cal).map(yr => (
+                <div key={yr.year}>
+                  {/* L2: Ano */}
+                  <div style={{ ...s.row, paddingLeft: 36 }} onClick={() => toggleYear(pid, yr.year)}>
+                    <span style={s.chevron}>{st.years[yr.year] ? '▾' : '▸'}</span>
+                    <span style={s.icon}>📁</span>
+                    <span style={s.label}>{yr.year}</span>
+                  </div>
+                  {st.years[yr.year] && yr.months.map(mo => (
+                    <div key={mo.key}>
+                      {/* L3: Mês */}
+                      <div style={{ ...s.row, paddingLeft: 48 }} onClick={() => toggleMonth(pid, mo.key)}>
+                        <span style={s.chevron}>{st.months[mo.key] ? '▾' : '▸'}</span>
+                        <span style={s.icon}>📁</span>
+                        <span style={s.label}>{mo.label}</span>
+                      </div>
+                      {st.months[mo.key] && mo.days.map(day => (
+                        <CalDayRow
+                          key={day.dateKey}
+                          day={day}
+                          isOpen={!!st.days[day.dateKey]}
+                          onToggle={() => toggleDay(pid, day.dateKey)}
+                          dragHandlers={dragHandlers}
+                        />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ))
+        )}
+
+        {/* L1: Documentos */}
+        <SectionHeader
+          icon="📄" label="Documentos" count={docs.length}
+          open={st.sections.docs} onClick={() => toggleSection(pid, 'docs')}
+        />
+        {st.sections.docs && (
+          docs.length === 0
+            ? <div style={{ ...s.hint, paddingLeft: 36 }}>Nenhum documento</div>
+            : buildTree(docs).map(n => (
+                <NoteRow key={n.id} note={n} indent={36}
+                  noteOpen={st.noteOpen} onToggle={nid => toggleNote(pid, nid)}
+                  dragHandlers={dragHandlers} />
+              ))
+        )}
+
+        {/* L1: Chats */}
+        <SectionHeader
+          icon="💬" label="Chats" count={chats.length}
+          open={st.sections.chat} onClick={() => toggleSection(pid, 'chat')}
+        />
+        {st.sections.chat && (
+          chats.length === 0
+            ? <div style={{ ...s.hint, paddingLeft: 36 }}>Nenhum chat</div>
+            : chats.map(n => (
+                <ChatRow key={n.id} note={n} />
+              ))
+        )}
+      </div>
+    )
+  }
+
+  const unassignedSt = states[UNASSIGNED_ID] ?? defaultProjState()
+  const unassignedFree  = byTypeUnassigned(0)
+  const unassignedCal   = byTypeUnassigned(1)
+  const unassignedDocs  = byTypeUnassigned(2)
+  const unassignedChats = byTypeUnassigned(3)
+
   return (
     <aside style={s.sidebar}>
       {/* Logo */}
@@ -392,6 +622,32 @@ export default function Sidebar() {
 
       {/* Tree */}
       <div style={s.tree}>
+        {/* "(Nenhum)" virtual root — notes without a project */}
+        <div key={UNASSIGNED_ID}>
+          <div
+            style={{
+              ...s.projRow,
+              background: dropTarget === UNASSIGNED_ID ? '#312e81' : '#0f172a',
+            }}
+            onClick={() => toggleProject(UNASSIGNED_ID)}
+            onDragOver={e => { e.preventDefault(); setDropTarget(UNASSIGNED_ID) }}
+            onDragLeave={() => setDropTarget(null)}
+            onDrop={e => {
+              e.preventDefault()
+              const nid = e.dataTransfer.getData('noteId')
+              if (nid) void moveNote(nid, null, null)
+              setDropTarget(null)
+            }}
+          >
+            <span style={s.chevron}>{unassignedSt.open ? '▾' : '▸'}</span>
+            <span style={s.icon}>📋</span>
+            <span style={s.projLabel}>(Nenhum)</span>
+          </div>
+          {unassignedSt.open && renderProjectContent(
+            UNASSIGNED_ID, unassignedFree, unassignedCal, unassignedDocs, unassignedChats
+          )}
+        </div>
+
         {projects.length === 0 && (
           <div style={s.empty}>
             Nenhum projeto ainda.
@@ -401,15 +657,29 @@ export default function Sidebar() {
 
         {projects.map(proj => {
           const st = states[proj.id] ?? defaultProjState()
-          const free = byType(proj.id, 0)
-          const cal  = byType(proj.id, 1)
-          const docs = byType(proj.id, 2)
+          const free  = byType(proj.id, 0)
+          const cal   = byType(proj.id, 1)
+          const docs  = byType(proj.id, 2)
           const chats = byType(proj.id, 3)
 
           return (
             <div key={proj.id}>
               {/* L0: Projeto */}
-              <div style={s.projRow} onClick={() => toggleProject(proj.id)}>
+              <div
+                style={{
+                  ...s.projRow,
+                  background: dropTarget === proj.id ? '#312e81' : '#0f172a',
+                }}
+                onClick={() => toggleProject(proj.id)}
+                onDragOver={e => { e.preventDefault(); setDropTarget(proj.id) }}
+                onDragLeave={() => setDropTarget(null)}
+                onDrop={e => {
+                  e.preventDefault()
+                  const nid = e.dataTransfer.getData('noteId')
+                  if (nid) void moveNote(nid, proj.id, null)
+                  setDropTarget(null)
+                }}
+              >
                 <span style={s.chevron}>{st.open ? '▾' : '▸'}</span>
                 <span style={s.icon}>🗂️</span>
                 <span style={s.projLabel}>{proj.name}</span>
@@ -418,93 +688,12 @@ export default function Sidebar() {
                   title="Nova nota neste projeto"
                   onClick={e => {
                     e.stopPropagation()
-                    navigate('/notes/new', { state: { projectId: proj.id } })
+                    navigate('/notes/new', { state: { projectId: proj.id, noteType: 1, date: todayIso } })
                   }}
                 >+</button>
               </div>
 
-              {st.open && (
-                <div>
-                  {/* L1: Notas Livres */}
-                  <SectionHeader
-                    icon="📝" label="Notas Livres" count={free.length}
-                    open={st.sections.free} onClick={() => toggleSection(proj.id, 'free')}
-                  />
-                  {st.sections.free && (
-                    free.length === 0
-                      ? <div style={{ ...s.hint, paddingLeft: 36 }}>Nenhuma nota livre</div>
-                      : buildTree(free).map(n => (
-                          <NoteRow key={n.id} note={n} indent={36}
-                            noteOpen={st.noteOpen} onToggle={nid => toggleNote(proj.id, nid)} />
-                        ))
-                  )}
-
-                  {/* L1: Notas de Calendário */}
-                  <SectionHeader
-                    icon="📅" label="Notas de Calendário" count={cal.length}
-                    open={st.sections.cal} onClick={() => toggleSection(proj.id, 'cal')}
-                  />
-                  {st.sections.cal && (
-                    cal.length === 0
-                      ? <div style={{ ...s.hint, paddingLeft: 36 }}>Nenhuma nota de calendário</div>
-                      : buildCalendar(cal).map(yr => (
-                          <div key={yr.year}>
-                            {/* L2: Ano */}
-                            <div style={{ ...s.row, paddingLeft: 36 }} onClick={() => toggleYear(proj.id, yr.year)}>
-                              <span style={s.chevron}>{st.years[yr.year] ? '▾' : '▸'}</span>
-                              <span style={s.icon}>📁</span>
-                              <span style={s.label}>{yr.year}</span>
-                            </div>
-                            {st.years[yr.year] && yr.months.map(mo => (
-                              <div key={mo.key}>
-                                {/* L3: Mês */}
-                                <div style={{ ...s.row, paddingLeft: 48 }} onClick={() => toggleMonth(proj.id, mo.key)}>
-                                  <span style={s.chevron}>{st.months[mo.key] ? '▾' : '▸'}</span>
-                                  <span style={s.icon}>📁</span>
-                                  <span style={s.label}>{mo.label}</span>
-                                </div>
-                                {st.months[mo.key] && mo.days.map(day => (
-                                  <CalDayRow
-                                    key={day.dateKey}
-                                    day={day}
-                                    isOpen={!!st.days[day.dateKey]}
-                                    onToggle={() => toggleDay(proj.id, day.dateKey)}
-                                  />
-                                ))}
-                              </div>
-                            ))}
-                          </div>
-                        ))
-                  )}
-
-                  {/* L1: Documentos */}
-                  <SectionHeader
-                    icon="📄" label="Documentos" count={docs.length}
-                    open={st.sections.docs} onClick={() => toggleSection(proj.id, 'docs')}
-                  />
-                  {st.sections.docs && (
-                    docs.length === 0
-                      ? <div style={{ ...s.hint, paddingLeft: 36 }}>Nenhum documento</div>
-                      : buildTree(docs).map(n => (
-                          <NoteRow key={n.id} note={n} indent={36}
-                            noteOpen={st.noteOpen} onToggle={nid => toggleNote(proj.id, nid)} />
-                        ))
-                  )}
-
-                  {/* L1: Chats */}
-                  <SectionHeader
-                    icon="💬" label="Chats" count={chats.length}
-                    open={st.sections.chat} onClick={() => toggleSection(proj.id, 'chat')}
-                  />
-                  {st.sections.chat && (
-                    chats.length === 0
-                      ? <div style={{ ...s.hint, paddingLeft: 36 }}>Nenhum chat</div>
-                      : chats.map(n => (
-                          <ChatRow key={n.id} note={n} />
-                        ))
-                  )}
-                </div>
-              )}
+              {st.open && renderProjectContent(proj.id, free, cal, docs, chats)}
             </div>
           )
         })}
@@ -517,6 +706,10 @@ export default function Sidebar() {
       <div style={s.bottom}>
         <button style={s.navBtn} onClick={() => navigate('/')}>🏠 Dashboard</button>
         <button style={s.navBtn} onClick={() => navigate('/projects/new')}>🗂️ Projetos</button>
+        <button
+          style={s.navBtn}
+          onClick={() => navigate('/notes/new', { state: { projectId: activeProjectId, date: todayIso, noteType: 0 } })}
+        >📝 Nova nota</button>
         <button style={s.navBtn} onClick={() => navigate('/chat/new')}>💬 Novo Chat</button>
         {authUser?.role === 'Admin' && (
           <button style={s.navBtn} onClick={() => navigate('/settings')}>⚙️ Configurações</button>

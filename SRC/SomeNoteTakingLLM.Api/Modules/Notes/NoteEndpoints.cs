@@ -19,6 +19,7 @@ public static class NoteEndpoints
         group.MapGet("/{id:guid}/children", GetChildren);
         group.MapPost("/", Create);
         group.MapPut("/{id:guid}", Update);
+        group.MapPatch("/{id:guid}/move", Move);
         group.MapDelete("/{id:guid}", Delete);
 
         return app;
@@ -144,6 +145,18 @@ public static class NoteEndpoints
         note.ProjectId = request.ProjectId;
         note.NoteDate = request.NoteDate;
         note.NoteType = request.NoteType;
+        note.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Results.Ok(ToResponse(note));
+    }
+
+    private static async Task<IResult> Move(Guid id, MoveNoteRequest request, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db)
+    {
+        var ownerId = GetUserId(user);
+        var note = await db.Notes.FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId);
+        if (note is null) return Results.NotFound();
+        note.ProjectId = request.ProjectId;
+        note.ParentNoteId = request.ParentNoteId;
         note.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         return Results.Ok(ToResponse(note));

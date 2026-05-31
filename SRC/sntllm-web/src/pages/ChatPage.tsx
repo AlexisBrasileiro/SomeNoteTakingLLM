@@ -19,7 +19,68 @@ interface PaperlessTag { id: number; name: string }
 interface PaperlessDoc { id: number; title: string; original_file_name?: string }
 interface DocumentQueryResult { strategy: string; strategyLabel: string; documents: PaperlessDoc[] }
 
-type SendStatus = 'idle' | 'sending' | 'error'
+type SendStatus = 'idle' | 'preparing' | 'thinking' | 'streaming' | 'error'
+
+const THINKING_MSGS = [
+  '🪔 Consultando o gênio da LLaMpada...',
+  '⚡ Calibrando o capacitor de fluxo...',
+  '🔵 Contando as quinas de um círculo...',
+  '🐙 Perguntando aos polvos quantificadores...',
+  '🧠 Reorganizando os neurônios artificiais...',
+  '💾 Traduzindo para binário e de volta...',
+  '🔍 Procurando agulha no palheiro digital...',
+  '🔥 Aquecendo os transistores...',
+  '🔮 Consultando o oráculo de silício...',
+  '🧬 Destrinchando os embeddings...',
+  '🌀 Dobrando o espaço de tokens...',
+  '🎲 Rolando o dado de probabilidade...',
+  '📡 Sintonizando na frequência do conhecimento...',
+  '🦙 Acordando a lhama adormecida...',
+  '⚗️ Preparando a poção de linguagem natural...',
+]
+
+function ThinkingIndicator({ status }: { status: SendStatus }) {
+  const [msgIdx, setMsgIdx] = useState(0)
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    if (status === 'idle' || status === 'error' || status === 'streaming') return
+    setElapsed(0)
+    setMsgIdx(0)
+    const ticker = setInterval(() => setElapsed(s => s + 1), 1000)
+    const rotator = setInterval(() => setMsgIdx(i => (i + 1) % THINKING_MSGS.length), 15_000)
+    return () => { clearInterval(ticker); clearInterval(rotator) }
+  }, [status])
+
+  if (status === 'idle' || status === 'error' || status === 'streaming') return null
+
+  const label = status === 'preparing' ? '⏳ Preparando contexto...' : THINKING_MSGS[msgIdx]
+  const mins = Math.floor(elapsed / 60)
+  const secs = elapsed % 60
+  const timer = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+
+  return (
+    <div style={TI.wrap}>
+      <span style={TI.msg}>{label}</span>
+      <span style={TI.timer}>{timer}</span>
+      <TypingDots />
+    </div>
+  )
+}
+
+const TI: Record<string, React.CSSProperties> = {
+  wrap: {
+    display: 'flex', alignItems: 'center', gap: 10,
+    padding: '8px 16px', background: 'rgba(99,102,241,0.10)',
+    borderBottom: '1px solid #6366f133', flexShrink: 0,
+    fontSize: 13, color: '#a5b4fc',
+  },
+  msg: { flex: 1, fontStyle: 'italic' },
+  timer: {
+    fontVariantNumeric: 'tabular-nums', fontSize: 12,
+    color: '#64748b', fontFamily: 'monospace',
+  },
+}
 
 function refIcon(type: ChatReference['type']) {
   if (type === 'note') return '📝'
@@ -241,7 +302,7 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
 
-  const isSending = sendStatus === 'sending'
+  const isSending = sendStatus === 'preparing' || sendStatus === 'thinking' || sendStatus === 'streaming'
 
   useEffect(() => {
     api.get<Project[]>('/projects').then(r => setProjects(r.data)).catch(() => {})
@@ -313,7 +374,7 @@ export default function ChatPage() {
     setInput('')
     setSelectedRefs([])
     setSendError(null)
-    setSendStatus('sending')
+    setSendStatus('preparing')
     if (refs && refs.length > 0) setRefsPanelOpen(true)
 
     console.log('[ChatPage] calling streaming POST /chats/' + id + '/messages/stream')
@@ -357,7 +418,12 @@ export default function ChatPage() {
           let evt: { type: string; content?: string; message?: ChatMessage; detail?: string }
           try { evt = JSON.parse(data) } catch { continue }
 
-          if (evt.type === 'token' && evt.content) {
+          if (evt.type === 'ping') {
+            // keep-alive — ignore
+          } else if (evt.type === 'thinking') {
+            setSendStatus('thinking')
+          } else if (evt.type === 'token' && evt.content) {
+            setSendStatus('streaming')
             setChat(prev => prev ? {
               ...prev,
               messages: prev.messages.map(m =>
@@ -482,10 +548,10 @@ export default function ChatPage() {
         </div>
 
         {/* Status */}
-        {isSending && (
+        <ThinkingIndicator status={sendStatus} />
+        {sendStatus === 'streaming' && (
           <div style={S.statusBar}>
-            <span style={{ color: '#818cf8', fontSize: 12, fontWeight: 600 }}>Aguardando resposta...</span>
-            <TypingDots />
+            <span style={{ color: '#34d399', fontSize: 12, fontWeight: 600 }}>✍️ Respondendo...</span>
           </div>
         )}
         {sendStatus === 'error' && sendError && (

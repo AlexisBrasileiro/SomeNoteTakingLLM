@@ -302,6 +302,46 @@ public static class ChatEndpoints
         var note = await db.Notes.FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId && n.NoteType == NoteType.Chat);
         if (note is null) { httpContext.Response.StatusCode = 404; return; }
 
+        // ── Open SSE stream immediately so nginx doesn't time out ────────────
+        httpContext.Response.ContentType = "text/event-stream; charset=utf-8";
+        httpContext.Response.Headers.CacheControl = "no-cache";
+        httpContext.Response.Headers.Connection = "keep-alive";
+        httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+        var responseLock = new SemaphoreSlim(1, 1);
+        async Task WriteEvent(string data)
+        {
+            await responseLock.WaitAsync();
+            try
+            {
+                if (!httpContext.RequestAborted.IsCancellationRequested)
+                {
+                    await httpContext.Response.WriteAsync($"data: {data}\n\n", httpContext.RequestAborted);
+                    await httpContext.Response.Body.FlushAsync(httpContext.RequestAborted);
+                }
+            }
+            catch { /* client disconnected */ }
+            finally { responseLock.Release(); }
+        }
+
+        // Send immediate ping — resets nginx's proxy_read_timeout clock
+        await WriteEvent("{\"type\":\"ping\"}");
+
+        // Background keep-alive: ping every 10 s while processing
+        using var pingCts = new CancellationTokenSource();
+        var keepAlive = Task.Run(async () =>
+        {
+            try
+            {
+                while (!pingCts.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(10_000, pingCts.Token);
+                    await WriteEvent("{\"type\":\"ping\"}");
+                }
+            }
+            catch { /* cancelled */ }
+        });
+
         // 1. Save user message
         var refsJson = request.References is { Length: > 0 }
             ? JsonSerializer.Serialize(request.References, JsonOpts) : null;
@@ -335,8 +375,8 @@ public static class ChatEndpoints
 
         if (string.IsNullOrWhiteSpace(ollamaUrl))
         {
-            httpContext.Response.StatusCode = 400;
-            await httpContext.Response.WriteAsync("{\"message\":\"Ollama não configurado. Configure a URL primária em Configurações → LLM.\"}");
+            await pingCts.CancelAsync();
+            await WriteEvent("{\"type\":\"error\",\"detail\":\"Ollama não configurado. Configure a URL primária em Configurações → LLM.\"}");
             return;
         }
 
@@ -354,19 +394,10 @@ public static class ChatEndpoints
         foreach (var msg in allMessages)
             ollamaMessages.Add(new { role = msg.Role, content = msg.Content });
 
-        // 6. SSE headers — from this point on we own the response
-        httpContext.Response.ContentType = "text/event-stream; charset=utf-8";
-        httpContext.Response.Headers.CacheControl = "no-cache";
-        httpContext.Response.Headers.Connection = "keep-alive";
-        httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+        // Signal frontend that we're about to call the LLM
+        await WriteEvent("{\"type\":\"thinking\"}");
 
-        async Task WriteEvent(string data)
-        {
-            await httpContext.Response.WriteAsync($"data: {data}\n\n");
-            await httpContext.Response.Body.FlushAsync();
-        }
-
-        // 7. Streaming Ollama call
+        // 6. Streaming Ollama call
         var fullContent = new StringBuilder();
         bool streamOk = false;
         string streamError = string.Empty;
@@ -418,13 +449,17 @@ public static class ChatEndpoints
             streamOk = await TryStream(fallbackUrl, fbModel);
         }
 
+        // Stop keep-alive
+        await pingCts.CancelAsync();
+        await keepAlive.ConfigureAwait(false);
+
         if (!streamOk)
         {
             await WriteEvent(JsonSerializer.Serialize(new { type = "error", detail = streamError }));
             return;
         }
 
-        // 8. Save assistant response
+        // 7. Save assistant response
         var assistantMessage = new ChatMessage
         {
             Id = Guid.NewGuid(), ChatNoteId = id, Role = "assistant",

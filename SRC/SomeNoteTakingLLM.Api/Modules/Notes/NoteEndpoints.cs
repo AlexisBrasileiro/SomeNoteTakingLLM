@@ -64,10 +64,50 @@ public static class NoteEndpoints
     {
         var ownerId = GetUserId(user);
         int depth = 0;
+        Guid? parentNoteId = request.ParentNoteId;
 
-        if (request.ParentNoteId.HasValue)
+        // Para CalendarNote sem pai explícito, auto-criar/reutilizar nota-container do dia
+        if (request.NoteType == NoteType.CalendarNote && request.NoteDate.HasValue && parentNoteId is null)
         {
-            var parent = await db.Notes.FirstOrDefaultAsync(n => n.Id == request.ParentNoteId.Value && n.OwnerId == ownerId);
+            var dateOnly = request.NoteDate.Value.Date;
+            var dayTitle = dateOnly.ToString("dd/MM/yyyy");
+
+            var dayContainer = await db.Notes.FirstOrDefaultAsync(n =>
+                n.OwnerId == ownerId &&
+                n.NoteType == NoteType.CalendarNote &&
+                n.ProjectId == request.ProjectId &&
+                n.ParentNoteId == null &&
+                n.NoteDate.HasValue &&
+                n.NoteDate.Value.Date == dateOnly &&
+                n.Title == dayTitle);
+
+            if (dayContainer is null)
+            {
+                var now2 = DateTime.UtcNow;
+                dayContainer = new Note
+                {
+                    Id = Guid.NewGuid(),
+                    OwnerId = ownerId,
+                    ProjectId = request.ProjectId,
+                    ParentNoteId = null,
+                    Title = dayTitle,
+                    Content = null,
+                    NoteDate = dateOnly,
+                    NoteType = NoteType.CalendarNote,
+                    Depth = 0,
+                    CreatedAt = now2,
+                    UpdatedAt = now2,
+                };
+                db.Notes.Add(dayContainer);
+                await db.SaveChangesAsync();
+            }
+
+            parentNoteId = dayContainer.Id;
+            depth = 1;
+        }
+        else if (parentNoteId.HasValue)
+        {
+            var parent = await db.Notes.FirstOrDefaultAsync(n => n.Id == parentNoteId.Value && n.OwnerId == ownerId);
             if (parent is null) return Results.BadRequest(new { message = "Nota pai nao encontrada." });
             depth = parent.Depth + 1;
             if (depth > MaxDepth)
@@ -80,7 +120,7 @@ public static class NoteEndpoints
             Id = Guid.NewGuid(),
             OwnerId = ownerId,
             ProjectId = request.ProjectId,
-            ParentNoteId = request.ParentNoteId,
+            ParentNoteId = parentNoteId,
             Title = request.Title,
             Content = request.Content,
             NoteDate = request.NoteDate,

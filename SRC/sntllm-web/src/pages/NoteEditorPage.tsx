@@ -17,18 +17,28 @@ export default function NoteEditorPage() {
   const isNew = id === 'new'
   const navigate = useNavigate()
   const location = useLocation()
-  const presetProjectId = (location.state as { projectId?: string } | null)?.projectId ?? ''
+  const navState = (location.state as { projectId?: string; noteType?: NoteType; date?: string } | null)
+  const presetProjectId = navState?.projectId ?? ''
+
+  const todayIso = new Date().toISOString().split('T')[0]
 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [projectId, setProjectId] = useState(presetProjectId)
-  const [noteDate, setNoteDate] = useState('')
+  const [noteDate, setNoteDate] = useState(navState?.date ?? todayIso)
   const [parentNoteId, setParentNoteId] = useState('')
-  const [noteType, setNoteType] = useState<NoteType>(0)
+  const [noteType, setNoteType] = useState<NoteType>(navState?.noteType ?? 0)
   const [projects, setProjects] = useState<Project[]>([])
   const [notes, setNotes] = useState<Note[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Ao trocar para CalendarNote, pré-preenche a data com hoje se estiver vazia
+  const handleNoteTypeChange = (t: NoteType) => {
+    setNoteType(t)
+    if (t === 1 && !noteDate) setNoteDate(todayIso)
+    if (t !== 1) setParentNoteId('')
+  }
 
   useEffect(() => {
     api.get<Project[]>('/projects').then(r => setProjects(r.data))
@@ -111,7 +121,7 @@ export default function NoteEditorPage() {
           <select
             style={styles.select}
             value={noteType}
-            onChange={e => setNoteType(Number(e.target.value) as NoteType)}
+            onChange={e => handleNoteTypeChange(Number(e.target.value) as NoteType)}
           >
             {([0, 1, 2] as NoteType[]).map(t => (
               <option key={t} value={t}>{NOTE_TYPE_LABELS[t]}</option>
@@ -128,6 +138,9 @@ export default function NoteEditorPage() {
             <>
               <label style={styles.metaLabel}>Data</label>
               <input type="date" style={styles.dateInput} value={noteDate} onChange={e => setNoteDate(e.target.value)} />
+              <span style={{ fontSize: 11, color: '#64748b' }}>
+                A nota será aninhada automaticamente na data selecionada
+              </span>
             </>
           )}
 

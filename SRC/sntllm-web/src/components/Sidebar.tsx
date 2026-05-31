@@ -27,27 +27,67 @@ const MONTH_NAMES = [
   'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro',
 ]
 
-interface CalDay   { dateKey: string; label: string; notes: Note[] }
+// isCalendarContainer: nota com título no formato "DD/MM/YYYY" e sem pai
+function isCalendarContainer(n: Note): boolean {
+  return n.parentNoteId == null && /^\d{2}\/\d{2}\/\d{4}$/.test(n.title ?? '')
+}
+
+interface CalDay   { dateKey: string; label: string; container: Note | null; children: Note[] }
 interface CalMonth { key: string; label: string; days: CalDay[] }
 interface CalYear  { year: string; months: CalMonth[] }
 
 function buildCalendar(notes: Note[]): CalYear[] {
-  const map = new Map<string, Map<string, Map<string, Note[]>>>()
+  // Separar containers de dia das notas-filhas
+  const containers = notes.filter(n => isCalendarContainer(n))
+  const childrenById = new Map<string, Note[]>()
   for (const n of notes) {
+    if (n.parentNoteId && !isCalendarContainer(n)) {
+      const arr = childrenById.get(n.parentNoteId) ?? []
+      arr.push(n)
+      childrenById.set(n.parentNoteId, arr)
+    }
+  }
+
+  // Notas-filhas que ficaram órfãs (sem container correspondente) — compatibilidade com dados antigos
+  const containerIds = new Set(containers.map(c => c.id))
+  const orphans = notes.filter(n =>
+    !isCalendarContainer(n) &&
+    n.noteDate &&
+    (!n.parentNoteId || !containerIds.has(n.parentNoteId))
+  )
+
+  // Agrupar por ano/mês/dia
+  const map = new Map<string, Map<string, Map<string, { container: Note | null; children: Note[] }>>>()
+
+  const addDay = (dk: string, y: string, mk: string, container: Note | null, children: Note[]) => {
+    if (!map.has(y)) map.set(y, new Map())
+    const months = map.get(y)!
+    if (!months.has(mk)) months.set(mk, new Map())
+    const days = months.get(mk)!
+    if (!days.has(dk)) days.set(dk, { container: null, children: [] })
+    const entry = days.get(dk)!
+    if (container) entry.container = container
+    entry.children.push(...children)
+  }
+
+  for (const c of containers) {
+    if (!c.noteDate) continue
+    const d = new Date(c.noteDate)
+    const y = d.getFullYear().toString()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    addDay(`${y}-${m}-${day}`, y, `${y}-${m}`, c, childrenById.get(c.id) ?? [])
+  }
+
+  for (const n of orphans) {
     if (!n.noteDate) continue
     const d = new Date(n.noteDate)
     const y = d.getFullYear().toString()
     const m = String(d.getMonth() + 1).padStart(2, '0')
     const day = String(d.getDate()).padStart(2, '0')
-    const mk = `${y}-${m}`
-    const dk = `${y}-${m}-${day}`
-    if (!map.has(y)) map.set(y, new Map())
-    const months = map.get(y)!
-    if (!months.has(mk)) months.set(mk, new Map())
-    const days = months.get(mk)!
-    if (!days.has(dk)) days.set(dk, [])
-    days.get(dk)!.push(n)
+    addDay(`${y}-${m}-${day}`, y, `${y}-${m}`, null, [n])
   }
+
   return [...map.entries()]
     .sort((a, b) => b[0].localeCompare(a[0]))
     .map(([year, months]) => ({
@@ -59,9 +99,9 @@ function buildCalendar(notes: Note[]): CalYear[] {
           label: MONTH_NAMES[parseInt(mk.split('-')[1]) - 1],
           days: [...days.entries()]
             .sort((a, b) => b[0].localeCompare(a[0]))
-            .map(([dk, dayNotes]) => {
+            .map(([dk, { container, children }]) => {
               const p = dk.split('-')
-              return { dateKey: dk, label: `${p[2]}/${p[1]}/${p[0]}`, notes: dayNotes }
+              return { dateKey: dk, label: `${p[2]}/${p[1]}/${p[0]}`, container, children }
             }),
         })),
     }))
@@ -74,11 +114,12 @@ interface ProjState {
   sections: Record<'free' | 'cal' | 'docs' | 'chat', boolean>
   years: Record<string, boolean>
   months: Record<string, boolean>
+  days: Record<string, boolean>
   noteOpen: Record<string, boolean>
 }
 
 function defaultProjState(): ProjState {
-  return { open: false, sections: { free: true, cal: false, docs: false, chat: false }, years: {}, months: {}, noteOpen: {} }
+  return { open: false, sections: { free: true, cal: false, docs: false, chat: false }, years: {}, months: {}, days: {}, noteOpen: {} }
 }
 
 // ── sub-components ────────────────────────────────────────────────────────────
@@ -127,20 +168,57 @@ function NoteRow({ note, indent, noteOpen, onToggle }: {
   )
 }
 
-function CalNoteRow({ note, dayLabel }: { note: Note; dayLabel: string }) {
+function CalNoteRow({ note }: { note: Note }) {
   const navigate = useNavigate()
   const location = useLocation()
   const isActive = location.pathname === `/notes/${note.id}`
   return (
     <div
-      style={{ ...s.row, paddingLeft: 60, background: isActive ? '#312e81' : undefined }}
+      style={{ ...s.row, paddingLeft: 72, background: isActive ? '#312e81' : undefined }}
       onClick={() => navigate(`/notes/${note.id}`)}
     >
       <span style={s.gap} />
       <span style={s.icon}>📄</span>
       <span style={{ ...s.label, fontSize: 12, color: isActive ? '#fff' : '#cbd5e1' }}>
-        {dayLabel}{note.title ? ` — ${note.title}` : ''}
+        {note.title || 'Sem título'}
       </span>
+    </div>
+  )
+}
+
+function CalDayRow({ day, isOpen, onToggle }: {
+  day: { dateKey: string; label: string; container: Note | null; children: Note[] }
+  isOpen: boolean
+  onToggle: () => void
+}) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const isActive = day.container ? location.pathname === `/notes/${day.container.id}` : false
+  const hasChildren = day.children.length > 0
+
+  return (
+    <div>
+      {/* L4: Dia — clicável se tiver nota-container */}
+      <div
+        style={{ ...s.row, paddingLeft: 60, background: isActive ? '#312e81' : undefined, cursor: 'pointer' }}
+        onClick={() => {
+          if (hasChildren) onToggle()
+          if (day.container) navigate(`/notes/${day.container.id}`)
+        }}
+      >
+        {hasChildren
+          ? <span style={s.chevron} onClick={e => { e.stopPropagation(); onToggle() }}>{isOpen ? '▾' : '▸'}</span>
+          : <span style={s.gap} />}
+        <span style={s.icon}>📅</span>
+        <span style={{ ...s.label, fontSize: 12, color: isActive ? '#fff' : '#94a3b8', fontWeight: 500 }}>
+          {day.label}
+        </span>
+        {day.children.length > 0 && (
+          <span style={{ ...s.badge, marginLeft: 4 }}>{day.children.length}</span>
+        )}
+      </div>
+      {/* L5: filhos */}
+      {isOpen && day.children.map(n => <CalNoteRow key={n.id} note={n} />)}
     </div>
   )
 }
@@ -159,6 +237,113 @@ function ChatRow({ note }: { note: Note }) {
       <span style={{ ...s.label, color: isActive ? '#fff' : '#cbd5e1' }}>
         {note.title || 'Chat sem título'}
       </span>
+    </div>
+  )
+}
+
+// ── MiniCalendar ──────────────────────────────────────────────────────────────
+
+function MiniCalendar({ notes }: { notes: Note[] }) {
+  const navigate = useNavigate()
+  const today = new Date()
+  const [view, setView] = useState({ year: today.getFullYear(), month: today.getMonth() })
+
+  // Build per-day counts (children only, not containers) and container map
+  const dateCounts    = new Map<string, number>()
+  const dateContainer = new Map<string, Note>()
+
+  for (const n of notes) {
+    if (n.noteType !== 1 || !n.noteDate) continue
+    const d  = new Date(n.noteDate)
+    const dk = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    if (isCalendarContainer(n)) {
+      dateContainer.set(dk, n)
+    } else {
+      dateCounts.set(dk, (dateCounts.get(dk) ?? 0) + 1)
+    }
+  }
+
+  const daysInMonth = new Date(view.year, view.month + 1, 0).getDate()
+  const startDow    = new Date(view.year, view.month, 1).getDay()
+  const todayDk     = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`
+
+  const cells: (number | null)[] = []
+  for (let i = 0; i < startDow; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d)
+
+  function toDk(day: number) {
+    return `${view.year}-${String(view.month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+  }
+
+  function handleDayClick(day: number) {
+    const dk  = toDk(day)
+    const cnt = dateContainer.get(dk)
+    if (cnt) {
+      navigate(`/notes/${cnt.id}`)
+    } else {
+      navigate('/notes/new', { state: { noteType: 1, date: dk } })
+    }
+  }
+
+  function dot(count: number): { char: string; color: string } | null {
+    if (count >= 10) return { char: '⁜', color: '#f87171' }
+    if (count >= 4)  return { char: '⁙', color: '#fbbf24' }
+    if (count >= 1)  return { char: '⁘', color: '#4ade80' }
+    return null
+  }
+
+  const prevMonth = () => setView(v => ({
+    year:  v.month === 0 ? v.year - 1 : v.year,
+    month: v.month === 0 ? 11 : v.month - 1,
+  }))
+  const nextMonth = () => setView(v => ({
+    year:  v.month === 11 ? v.year + 1 : v.year,
+    month: v.month === 11 ? 0 : v.month + 1,
+  }))
+
+  const DOW = ['D','S','T','Q','Q','S','S']
+
+  return (
+    <div style={s.miniCal}>
+      <div style={s.calHeader}>
+        <button style={s.calNavBtn} onClick={prevMonth}>‹</button>
+        <span style={s.calTitle}>{MONTH_NAMES[view.month]} {view.year}</span>
+        <button style={s.calNavBtn} onClick={nextMonth}>›</button>
+      </div>
+
+      <div style={s.calGrid}>
+        {DOW.map((d, i) => (
+          <div key={i} style={s.calDow}>{d}</div>
+        ))}
+        {cells.map((day, i) => {
+          if (!day) return <div key={i} style={s.calCell} />
+          const dk    = toDk(day)
+          const count = dateCounts.get(dk) ?? 0
+          const d     = dot(count)
+          const isToday = dk === todayDk
+          return (
+            <div
+              key={i}
+              style={{
+                ...s.calCell,
+                background: isToday ? '#4f46e5' : undefined,
+                borderRadius: isToday ? 4 : undefined,
+                cursor: 'pointer',
+              }}
+              onClick={() => handleDayClick(day)}
+            >
+              <span style={{ ...s.calDayNum, color: isToday ? '#fff' : '#cbd5e1' }}>{day}</span>
+              {d && <span style={{ fontSize: 7, color: d.color, lineHeight: 1 }}>{d.char}</span>}
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={s.calLegend}>
+        <span style={{ color: '#4ade80' }}>⁘</span> 1-3 &nbsp;
+        <span style={{ color: '#fbbf24' }}>⁙</span> 4-9 &nbsp;
+        <span style={{ color: '#f87171' }}>⁜</span> 10+
+      </div>
     </div>
   )
 }
@@ -189,6 +374,8 @@ export default function Sidebar() {
     upd(pid, c => ({ ...c, years: { ...c.years, [y]: !c.years[y] } }))
   const toggleMonth = (pid: string, mk: string) =>
     upd(pid, c => ({ ...c, months: { ...c.months, [mk]: !c.months[mk] } }))
+  const toggleDay = (pid: string, dk: string) =>
+    upd(pid, c => ({ ...c, days: { ...c.days, [dk]: !c.days[dk] } }))
   const toggleNote = (pid: string, nid: string) =>
     upd(pid, c => ({ ...c, noteOpen: { ...c.noteOpen, [nid]: !c.noteOpen[nid] } }))
 
@@ -276,12 +463,14 @@ export default function Sidebar() {
                                   <span style={s.icon}>📁</span>
                                   <span style={s.label}>{mo.label}</span>
                                 </div>
-                                {st.months[mo.key] && mo.days.flatMap(day =>
-                                  day.notes.map(n => (
-                                    /* L4: Dia */
-                                    <CalNoteRow key={n.id} note={n} dayLabel={day.label} />
-                                  ))
-                                )}
+                                {st.months[mo.key] && mo.days.map(day => (
+                                  <CalDayRow
+                                    key={day.dateKey}
+                                    day={day}
+                                    isOpen={!!st.days[day.dateKey]}
+                                    onToggle={() => toggleDay(proj.id, day.dateKey)}
+                                  />
+                                ))}
                               </div>
                             ))}
                           </div>
@@ -320,6 +509,9 @@ export default function Sidebar() {
           )
         })}
       </div>
+
+      {/* Mini Calendar */}
+      <MiniCalendar notes={notes} />
 
       {/* Bottom */}
       <div style={s.bottom}>
@@ -421,4 +613,36 @@ const s: Record<string, React.CSSProperties> = {
   },
   userName: { fontSize: 12, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis' },
   logoutBtn: { background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 12 },
+
+  // MiniCalendar
+  miniCal: {
+    borderTop: '1px solid #334155',
+    padding: '0.5rem 0.5rem 0.35rem',
+    flexShrink: 0,
+  },
+  calHeader: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  calTitle: { fontSize: 11, fontWeight: 700, color: '#94a3b8', letterSpacing: '0.02em' },
+  calNavBtn: {
+    background: 'none', border: 'none', color: '#6366f1',
+    cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '0 4px',
+  },
+  calGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
+  },
+  calDow: {
+    fontSize: 9, color: '#475569', textAlign: 'center' as const,
+    fontWeight: 700, padding: '2px 0',
+  },
+  calCell: {
+    display: 'flex', flexDirection: 'column' as const, alignItems: 'center',
+    padding: '2px 1px', minHeight: 22, borderRadius: 3,
+  },
+  calDayNum: { fontSize: 10, lineHeight: '1.3' },
+  calLegend: {
+    fontSize: 9, color: '#475569', textAlign: 'center' as const,
+    marginTop: 5, letterSpacing: '0.03em',
+  },
 }

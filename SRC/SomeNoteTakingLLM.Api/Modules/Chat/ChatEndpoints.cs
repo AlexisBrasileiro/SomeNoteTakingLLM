@@ -26,8 +26,10 @@ public static class ChatEndpoints
         group.MapGet("/", GetChats);
         group.MapPost("/", CreateChat);
         group.MapGet("/{id:guid}", GetChat);
+        group.MapPatch("/{id:guid}", PatchChat);
         group.MapDelete("/{id:guid}", DeleteChat);
         group.MapPost("/{id:guid}/messages", SendMessage);
+        group.MapPost("/{id:guid}/messages/stream", StreamMessage);
 
         return app;
     }
@@ -116,6 +118,30 @@ public static class ChatEndpoints
             messages.Select(ToMessageResponse).ToArray()));
     }
 
+    // PATCH /api/v1/chats/{id}
+    private static async Task<IResult> PatchChat(Guid id, PatchChatRequest request, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db)
+    {
+        var ownerId = GetUserId(user);
+        var note = await db.Notes.FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId && n.NoteType == NoteType.Chat);
+        if (note is null) return Results.NotFound();
+
+        if (request.ProjectId is not null)
+        {
+            if (string.IsNullOrWhiteSpace(request.ProjectId))
+                note.ProjectId = null;
+            else if (Guid.TryParse(request.ProjectId, out var pid))
+                note.ProjectId = pid;
+        }
+        else
+        {
+            note.ProjectId = null;
+        }
+
+        note.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return Results.NoContent();
+    }
+
     // DELETE /api/v1/chats/{id}
     private static async Task<IResult> DeleteChat(Guid id, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db)
     {
@@ -172,168 +198,78 @@ public static class ChatEndpoints
 
         // 4. Fetch Ollama config
         var ollamaSettings = await db.AppSettings
-            .Where(s => s.Key == "ollama.primaryUrl" || s.Key == "ollama.primaryModel")
+            .Where(s => s.Key == "llm.primary.url" || s.Key == "llm.primary.model"
+                     || s.Key == "llm.fallback.enabled" || s.Key == "llm.fallback.url" || s.Key == "llm.fallback.model")
             .ToListAsync();
 
-        var ollamaUrl = ollamaSettings.FirstOrDefault(s => s.Key == "ollama.primaryUrl")?.Value;
-        var ollamaModel = ollamaSettings.FirstOrDefault(s => s.Key == "ollama.primaryModel")?.Value;
+        var ollamaUrl = ollamaSettings.FirstOrDefault(s => s.Key == "llm.primary.url")?.Value;
+        var ollamaModel = ollamaSettings.FirstOrDefault(s => s.Key == "llm.primary.model")?.Value;
+        var fallbackEnabled = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.enabled")?.Value == "true";
+        var fallbackUrl   = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.url")?.Value;
+        var fallbackModel = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.model")?.Value;
 
         if (string.IsNullOrWhiteSpace(ollamaUrl))
-            return Results.BadRequest(new { message = "Ollama não configurado. Configure 'ollama.primaryUrl' nas configurações." });
+            return Results.BadRequest(new { message = "Ollama não configurado. Configure a URL primária em Configurações → LLM." });
 
-        ollamaModel ??= "llama3";
+        ollamaModel = string.IsNullOrWhiteSpace(ollamaModel) ? "llama3" : ollamaModel;
 
-        // 5. Build context from references
-        var contextBuilder = new StringBuilder();
+        // 5. Build full context (user refs + automatic project context)
+        var contextString = await BuildContextAsync(
+            db, ownerId, allRefs,
+            note.ProjectId, request.ContextDays ?? 90);
 
-        if (allRefs.Count > 0)
-        {
-            var paperlessSettings = await db.AppSettings
-                .Where(s => s.Key == "paperless.url" || s.Key == "paperless.token")
-                .ToListAsync();
-
-            var paperlessUrl = paperlessSettings.FirstOrDefault(s => s.Key == "paperless.url")?.Value?.TrimEnd('/');
-            var paperlessToken = paperlessSettings.FirstOrDefault(s => s.Key == "paperless.token")?.Value;
-
-            foreach (var refItem in allRefs)
-            {
-                if (refItem.Type == "note")
-                {
-                    if (Guid.TryParse(refItem.Id, out var noteId))
-                    {
-                        var referencedNote = await db.Notes.FirstOrDefaultAsync(n => n.Id == noteId && n.OwnerId == ownerId);
-                        if (referencedNote is not null)
-                        {
-                            contextBuilder.AppendLine($"### Nota: {referencedNote.Title ?? "Sem título"}");
-                            if (!string.IsNullOrWhiteSpace(referencedNote.Content))
-                                contextBuilder.AppendLine(referencedNote.Content);
-                            contextBuilder.AppendLine();
-                        }
-                    }
-                }
-                else if (refItem.Type == "paperless_document" && !string.IsNullOrWhiteSpace(paperlessUrl) && !string.IsNullOrWhiteSpace(paperlessToken))
-                {
-                    try
-                    {
-                        using var client = BuildPaperlessClient(paperlessToken);
-                        var resp = await client.GetAsync($"{paperlessUrl}/api/documents/{refItem.Id}/");
-                        if (resp.IsSuccessStatusCode)
-                        {
-                            var json = await resp.Content.ReadAsStringAsync();
-                            using var doc = JsonDocument.Parse(json);
-                            var root = doc.RootElement;
-                            var docTitle = root.TryGetProperty("title", out var titleProp) ? titleProp.GetString() : refItem.Title;
-                            var content = root.TryGetProperty("content", out var contentProp) ? contentProp.GetString() : null;
-                            contextBuilder.AppendLine($"### Documento Paperless: {docTitle}");
-                            if (!string.IsNullOrWhiteSpace(content))
-                                contextBuilder.AppendLine(content);
-                            contextBuilder.AppendLine();
-                        }
-                    }
-                    catch { /* silently skip if paperless fails */ }
-                }
-                else if (refItem.Type == "paperless_tag" && !string.IsNullOrWhiteSpace(paperlessUrl) && !string.IsNullOrWhiteSpace(paperlessToken))
-                {
-                    try
-                    {
-                        using var client = BuildPaperlessClient(paperlessToken);
-                        var resp = await client.GetAsync($"{paperlessUrl}/api/documents/?tags__id__all={refItem.Id}&page_size=20");
-                        if (resp.IsSuccessStatusCode)
-                        {
-                            var json = await resp.Content.ReadAsStringAsync();
-                            using var doc = JsonDocument.Parse(json);
-                            var root = doc.RootElement;
-                            contextBuilder.AppendLine($"### Tag Paperless: {refItem.Title}");
-                            contextBuilder.AppendLine("Documentos com esta tag:");
-                            if (root.TryGetProperty("results", out var results))
-                            {
-                                foreach (var docEl in results.EnumerateArray())
-                                {
-                                    var docTitle = docEl.TryGetProperty("title", out var tp) ? tp.GetString() : "Sem título";
-                                    contextBuilder.AppendLine($"- {docTitle}");
-                                }
-                            }
-                            contextBuilder.AppendLine();
-                        }
-                    }
-                    catch { /* silently skip if paperless fails */ }
-                }
-            }
-        }
-
-        // 6. Build system prompt
+        // 6. Build system prompt + Ollama messages
         var systemContent = "Você é um assistente inteligente de anotações. Responda de forma clara, precisa e útil.";
-        if (contextBuilder.Length > 0)
-            systemContent += $"\n\n## Contexto disponível:\n{contextBuilder}";
+        if (!string.IsNullOrWhiteSpace(contextString))
+            systemContent += $"\n\n## Contexto disponível:\n{contextString}";
 
-        // 7. Build message list for Ollama
-        var ollamaMessages = new List<object>
-        {
-            new { role = "system", content = systemContent }
-        };
-
-        // All messages except the last (user just saved) were already in history
+        var ollamaMessages = new List<object> { new { role = "system", content = systemContent } };
         foreach (var msg in allMessages)
-        {
             ollamaMessages.Add(new { role = msg.Role, content = msg.Content });
-        }
 
-        // 8. Call Ollama
-        var ollamaPayload = new
-        {
-            model = ollamaModel,
-            messages = ollamaMessages,
-            stream = false
-        };
-
+        // 7. Call Ollama (with fallback)
         string assistantContent;
-        try
-        {
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
-            var ollamaJson = JsonSerializer.Serialize(ollamaPayload, JsonOpts);
-            using var httpContent = new StringContent(ollamaJson, Encoding.UTF8, "application/json");
-            var ollamaResp = await httpClient.PostAsync($"{ollamaUrl.TrimEnd('/')}/api/chat", httpContent);
+        var lastError = string.Empty;
 
-            if (!ollamaResp.IsSuccessStatusCode)
+        async Task<(bool ok, string content, string error)> CallOllama(string url, string model)
+        {
+            try
             {
-                var errBody = await ollamaResp.Content.ReadAsStringAsync();
-                return Results.Problem(
-                    detail: $"Ollama retornou status {(int)ollamaResp.StatusCode}: {errBody}",
-                    statusCode: 502,
-                    title: "Erro ao chamar Ollama");
+                var payload = new { model, messages = ollamaMessages, stream = false };
+                using var hc = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
+                var json = JsonSerializer.Serialize(payload, JsonOpts);
+                using var body = new StringContent(json, Encoding.UTF8, "application/json");
+                var resp = await hc.PostAsync($"{url.TrimEnd('/')}/api/chat", body);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var errBody = await resp.Content.ReadAsStringAsync();
+                    return (false, string.Empty, $"Ollama {url} retornou {(int)resp.StatusCode}: {errBody}");
+                }
+                var respJson = await resp.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(respJson);
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("message", out var mp) || !root.TryGetProperty("message", out _) || !mp.TryGetProperty("content", out var cp))
+                    return (false, string.Empty, "Resposta do Ollama em formato inesperado.");
+                return (true, cp.GetString() ?? string.Empty, string.Empty);
             }
-
-            var ollamaRespJson = await ollamaResp.Content.ReadAsStringAsync();
-            using var ollamaDoc = JsonDocument.Parse(ollamaRespJson);
-            var ollamaRoot = ollamaDoc.RootElement;
-
-            if (!ollamaRoot.TryGetProperty("message", out var messageProp) ||
-                !messageProp.TryGetProperty("content", out var contentProp2))
-            {
-                return Results.Problem(
-                    detail: "Resposta do Ollama em formato inesperado.",
-                    statusCode: 502,
-                    title: "Erro ao processar resposta do Ollama");
-            }
-
-            assistantContent = contentProp2.GetString() ?? string.Empty;
+            catch (TaskCanceledException) { return (false, string.Empty, $"Timeout ao chamar Ollama em {url}."); }
+            catch (HttpRequestException ex) { return (false, string.Empty, $"Erro ao conectar ao Ollama em {url}: {ex.Message}"); }
         }
-        catch (TaskCanceledException)
+
+        var (ok, content2, err) = await CallOllama(ollamaUrl, ollamaModel);
+        if (!ok && fallbackEnabled && !string.IsNullOrWhiteSpace(fallbackUrl))
         {
-            return Results.Problem(
-                detail: "Ollama demorou muito para responder (timeout).",
-                statusCode: 504,
-                title: "Timeout ao chamar Ollama");
-        }
-        catch (HttpRequestException ex)
-        {
-            return Results.Problem(
-                detail: $"Não foi possível conectar ao Ollama: {ex.Message}",
-                statusCode: 502,
-                title: "Erro ao conectar ao Ollama");
+            lastError = err;
+            var fbModel = string.IsNullOrWhiteSpace(fallbackModel) ? ollamaModel : fallbackModel;
+            (ok, content2, err) = await CallOllama(fallbackUrl, fbModel);
         }
 
-        // 9. Save assistant response
+        if (!ok)
+            return Results.Problem(detail: err, statusCode: 502, title: "Erro ao chamar Ollama");
+
+        assistantContent = content2;
+
+        // 8. Save assistant response
         var assistantMessage = new ChatMessage
         {
             Id = Guid.NewGuid(),
@@ -352,11 +288,320 @@ public static class ChatEndpoints
         return Results.Ok(ToMessageResponse(assistantMessage));
     }
 
+    // POST /api/v1/chats/{id}/messages/stream  — SSE streaming response
+    private static async Task StreamMessage(
+        Guid id,
+        HttpContext httpContext,
+        ClaimsPrincipal user,
+        SomeNoteTakingLlmDbContext db)
+    {
+        var ownerId = GetUserId(user);
+        var request = await httpContext.Request.ReadFromJsonAsync<SendMessageRequest>(JsonOpts);
+        if (request is null) { httpContext.Response.StatusCode = 400; return; }
+
+        var note = await db.Notes.FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId && n.NoteType == NoteType.Chat);
+        if (note is null) { httpContext.Response.StatusCode = 404; return; }
+
+        // 1. Save user message
+        var refsJson = request.References is { Length: > 0 }
+            ? JsonSerializer.Serialize(request.References, JsonOpts) : null;
+
+        var userMessage = new ChatMessage
+        {
+            Id = Guid.NewGuid(), ChatNoteId = id, Role = "user",
+            Content = request.Content, ReferencesJson = refsJson, CreatedAt = DateTime.UtcNow
+        };
+        db.ChatMessages.Add(userMessage);
+        await db.SaveChangesAsync();
+
+        // 2. Load conversation + refs
+        var allMessages = await db.ChatMessages
+            .Where(m => m.ChatNoteId == id).OrderBy(m => m.CreatedAt).ToListAsync();
+        var allRefs = allMessages
+            .SelectMany(m => DeserializeRefs(m.ReferencesJson) ?? [])
+            .GroupBy(r => $"{r.Type}:{r.Id}").Select(g => g.First()).ToList();
+
+        // 3. Ollama config
+        var ollamaSettings = await db.AppSettings
+            .Where(s => s.Key == "llm.primary.url" || s.Key == "llm.primary.model"
+                     || s.Key == "llm.fallback.enabled" || s.Key == "llm.fallback.url" || s.Key == "llm.fallback.model")
+            .ToListAsync();
+
+        var ollamaUrl   = ollamaSettings.FirstOrDefault(s => s.Key == "llm.primary.url")?.Value;
+        var ollamaModel = ollamaSettings.FirstOrDefault(s => s.Key == "llm.primary.model")?.Value ?? "llama3";
+        var fallbackEnabled = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.enabled")?.Value == "true";
+        var fallbackUrl   = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.url")?.Value;
+        var fallbackModel = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.model")?.Value;
+
+        if (string.IsNullOrWhiteSpace(ollamaUrl))
+        {
+            httpContext.Response.StatusCode = 400;
+            await httpContext.Response.WriteAsync("{\"message\":\"Ollama não configurado. Configure a URL primária em Configurações → LLM.\"}");
+            return;
+        }
+
+        // 4. Build full context (user refs + automatic project context)
+        var contextString = await BuildContextAsync(
+            db, ownerId, allRefs,
+            note.ProjectId, request.ContextDays ?? 90);
+
+        // 5. Build Ollama messages
+        var systemContent = "Você é um assistente inteligente de anotações. Responda de forma clara, precisa e útil.";
+        if (!string.IsNullOrWhiteSpace(contextString))
+            systemContent += $"\n\n## Contexto disponível:\n{contextString}";
+
+        var ollamaMessages = new List<object> { new { role = "system", content = systemContent } };
+        foreach (var msg in allMessages)
+            ollamaMessages.Add(new { role = msg.Role, content = msg.Content });
+
+        // 6. SSE headers — from this point on we own the response
+        httpContext.Response.ContentType = "text/event-stream; charset=utf-8";
+        httpContext.Response.Headers.CacheControl = "no-cache";
+        httpContext.Response.Headers.Connection = "keep-alive";
+        httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+        async Task WriteEvent(string data)
+        {
+            await httpContext.Response.WriteAsync($"data: {data}\n\n");
+            await httpContext.Response.Body.FlushAsync();
+        }
+
+        // 7. Streaming Ollama call
+        var fullContent = new StringBuilder();
+        bool streamOk = false;
+        string streamError = string.Empty;
+
+        async Task<bool> TryStream(string url, string model)
+        {
+            try
+            {
+                var payload = new { model, messages = ollamaMessages, stream = true };
+                using var hc = new HttpClient { Timeout = TimeSpan.FromSeconds(300) };
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"{url.TrimEnd('/')}/api/chat")
+                    { Content = new StringContent(JsonSerializer.Serialize(payload, JsonOpts), Encoding.UTF8, "application/json") };
+                using var resp = await hc.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, httpContext.RequestAborted);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    streamError = $"Ollama {url} retornou {(int)resp.StatusCode}";
+                    return false;
+                }
+                await using var stream = await resp.Content.ReadAsStreamAsync(httpContext.RequestAborted);
+                using var reader = new System.IO.StreamReader(stream);
+                while (!reader.EndOfStream)
+                {
+                    var line = await reader.ReadLineAsync();
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    using var doc = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("message", out var mp) && mp.TryGetProperty("content", out var cp))
+                    {
+                        var token = cp.GetString();
+                        if (!string.IsNullOrEmpty(token))
+                        {
+                            fullContent.Append(token);
+                            await WriteEvent(JsonSerializer.Serialize(new { type = "token", content = token }));
+                        }
+                    }
+                    if (root.TryGetProperty("done", out var done) && done.GetBoolean()) break;
+                }
+                return true;
+            }
+            catch (OperationCanceledException) { streamError = "Conexão encerrada pelo cliente."; return false; }
+            catch (Exception ex) { streamError = ex.Message; return false; }
+        }
+
+        streamOk = await TryStream(ollamaUrl, ollamaModel);
+        if (!streamOk && fallbackEnabled && !string.IsNullOrWhiteSpace(fallbackUrl))
+        {
+            fullContent.Clear();
+            var fbModel = string.IsNullOrWhiteSpace(fallbackModel) ? ollamaModel : fallbackModel;
+            streamOk = await TryStream(fallbackUrl, fbModel);
+        }
+
+        if (!streamOk)
+        {
+            await WriteEvent(JsonSerializer.Serialize(new { type = "error", detail = streamError }));
+            return;
+        }
+
+        // 8. Save assistant response
+        var assistantMessage = new ChatMessage
+        {
+            Id = Guid.NewGuid(), ChatNoteId = id, Role = "assistant",
+            Content = fullContent.ToString(), ReferencesJson = null, CreatedAt = DateTime.UtcNow
+        };
+        db.ChatMessages.Add(assistantMessage);
+        note.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        await WriteEvent(JsonSerializer.Serialize(new { type = "done", message = ToMessageResponse(assistantMessage) }, JsonOpts));
+    }
+
     private static HttpClient BuildPaperlessClient(string token)
     {
         var client = new HttpClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Token", token);
         client.Timeout = TimeSpan.FromSeconds(15);
         return client;
+    }
+
+    /// <summary>
+    /// Builds the full LLM context string:
+    ///  1. User-selected refs (notes, paperless docs, paperless tags)
+    ///  2. All notes from the project edited within <paramref name="contextDays"/> days
+    ///  3. Paperless docs belonging to the project's tag (if configured)
+    /// </summary>
+    private static async Task<string> BuildContextAsync(
+        SomeNoteTakingLlmDbContext db,
+        Guid ownerId,
+        List<ChatReference> userRefs,
+        Guid? projectId,
+        int contextDays)
+    {
+        var sb = new StringBuilder();
+
+        // Load Paperless settings once
+        var plSettings = await db.AppSettings
+            .Where(s => s.Key == "paperless.url" || s.Key == "paperless.token")
+            .ToListAsync();
+        var plUrl   = plSettings.FirstOrDefault(s => s.Key == "paperless.url")?.Value?.TrimEnd('/');
+        var plToken = plSettings.FirstOrDefault(s => s.Key == "paperless.token")?.Value;
+
+        // ── 1. User-selected refs ─────────────────────────────────────────────
+        var refNoteIds = new HashSet<Guid>();
+        var refDocIds  = new HashSet<string>();
+
+        if (userRefs.Count > 0)
+        {
+            sb.AppendLine("## Referências selecionadas manualmente");
+            sb.AppendLine();
+            foreach (var refItem in userRefs)
+            {
+                if (refItem.Type == "note" && Guid.TryParse(refItem.Id, out var nid))
+                {
+                    refNoteIds.Add(nid);
+                    var refNote = await db.Notes.FirstOrDefaultAsync(n => n.Id == nid && n.OwnerId == ownerId);
+                    if (refNote is not null)
+                    {
+                        sb.AppendLine($"### Nota: {refNote.Title ?? "Sem título"}");
+                        if (!string.IsNullOrWhiteSpace(refNote.Content)) sb.AppendLine(refNote.Content);
+                        sb.AppendLine();
+                    }
+                }
+                else if (refItem.Type == "paperless_document" && !string.IsNullOrWhiteSpace(plUrl) && !string.IsNullOrWhiteSpace(plToken))
+                {
+                    refDocIds.Add(refItem.Id);
+                    try
+                    {
+                        using var pc = BuildPaperlessClient(plToken);
+                        var pr = await pc.GetAsync($"{plUrl}/api/documents/{refItem.Id}/");
+                        if (pr.IsSuccessStatusCode)
+                        {
+                            using var pd = JsonDocument.Parse(await pr.Content.ReadAsStringAsync());
+                            var t = pd.RootElement.TryGetProperty("title", out var tp) ? tp.GetString() : refItem.Title;
+                            var c = pd.RootElement.TryGetProperty("content", out var cp) ? cp.GetString() : null;
+                            sb.AppendLine($"### Documento Paperless: {t}");
+                            if (!string.IsNullOrWhiteSpace(c)) sb.AppendLine(c);
+                            sb.AppendLine();
+                        }
+                    }
+                    catch { /* silently skip */ }
+                }
+                else if (refItem.Type == "paperless_tag" && !string.IsNullOrWhiteSpace(plUrl) && !string.IsNullOrWhiteSpace(plToken))
+                {
+                    try
+                    {
+                        using var pc = BuildPaperlessClient(plToken);
+                        var pr = await pc.GetAsync($"{plUrl}/api/documents/?tags__id__all={refItem.Id}&page_size=50");
+                        if (pr.IsSuccessStatusCode)
+                        {
+                            using var pd = JsonDocument.Parse(await pr.Content.ReadAsStringAsync());
+                            sb.AppendLine($"### Tag Paperless: {refItem.Title}");
+                            if (pd.RootElement.TryGetProperty("results", out var results))
+                                foreach (var de in results.EnumerateArray())
+                                {
+                                    var dt = de.TryGetProperty("title", out var dtp) ? dtp.GetString() : "Sem título";
+                                    var did = de.TryGetProperty("id", out var didp) ? didp.GetInt32().ToString() : null;
+                                    if (did is not null) refDocIds.Add(did);
+                                    sb.AppendLine($"- {dt}");
+                                }
+                            sb.AppendLine();
+                        }
+                    }
+                    catch { /* silently skip */ }
+                }
+            }
+        }
+
+        // ── 2. Automatic project context ──────────────────────────────────────
+        if (projectId.HasValue)
+        {
+            var project = await db.Set<SomeNoteTakingLLM.Api.Domain.Project>()
+                .FirstOrDefaultAsync(p => p.Id == projectId.Value && p.OwnerId == ownerId);
+
+            if (project is not null)
+            {
+                var since = DateTime.UtcNow.AddDays(-contextDays);
+
+                // 2a. Project notes edited within contextDays
+                var projectNotes = await db.Notes
+                    .Where(n => n.ProjectId == projectId && n.OwnerId == ownerId
+                             && n.NoteType != NoteType.Chat
+                             && n.UpdatedAt >= since
+                             && !refNoteIds.Contains(n.Id))
+                    .OrderByDescending(n => n.UpdatedAt)
+                    .Take(50)
+                    .ToListAsync();
+
+                if (projectNotes.Count > 0)
+                {
+                    sb.AppendLine($"## Notas do projeto \"{project.Name}\" (últimos {contextDays} dias)");
+                    sb.AppendLine();
+                    foreach (var pn in projectNotes)
+                    {
+                        sb.AppendLine($"### {pn.Title ?? "Sem título"} (atualizado {pn.UpdatedAt:dd/MM/yyyy})");
+                        if (!string.IsNullOrWhiteSpace(pn.Content)) sb.AppendLine(pn.Content);
+                        sb.AppendLine();
+                    }
+                }
+
+                // 2b. Paperless docs via project tag
+                if (project.PaperlessTagId.HasValue && !string.IsNullOrWhiteSpace(plUrl) && !string.IsNullOrWhiteSpace(plToken))
+                {
+                    try
+                    {
+                        using var pc = BuildPaperlessClient(plToken);
+                        var pr = await pc.GetAsync($"{plUrl}/api/documents/?tags__id__all={project.PaperlessTagId}&page_size=50");
+                        if (pr.IsSuccessStatusCode)
+                        {
+                            using var pd = JsonDocument.Parse(await pr.Content.ReadAsStringAsync());
+                            if (pd.RootElement.TryGetProperty("results", out var results))
+                            {
+                                var newDocs = results.EnumerateArray()
+                                    .Where(d => {
+                                        var did = d.TryGetProperty("id", out var dp) ? dp.GetInt32().ToString() : null;
+                                        return did is not null && !refDocIds.Contains(did);
+                                    })
+                                    .ToList();
+
+                                if (newDocs.Count > 0)
+                                {
+                                    sb.AppendLine($"## Documentos Paperless do projeto \"{project.Name}\" (tag #{project.PaperlessTagId})");
+                                    foreach (var de in newDocs)
+                                    {
+                                        var dt = de.TryGetProperty("title", out var dtp) ? dtp.GetString() : "Sem título";
+                                        sb.AppendLine($"- {dt}");
+                                    }
+                                    sb.AppendLine();
+                                }
+                            }
+                        }
+                    }
+                    catch { /* silently skip */ }
+                }
+            }
+        }
+
+        return sb.ToString();
     }
 }

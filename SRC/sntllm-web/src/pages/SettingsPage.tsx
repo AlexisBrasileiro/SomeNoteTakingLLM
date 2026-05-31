@@ -584,8 +584,9 @@ const s: Record<string, React.CSSProperties> = {
   page: {
     padding: '2rem',
     color: 'var(--text-primary)',
-    minHeight: '100vh',
     background: 'var(--bg-primary)',
+    flex: 1,
+    overflowY: 'auto' as const,
   },
   title: { fontSize: 22, fontWeight: 700, marginBottom: 20, color: 'var(--text-primary)' },
   tabs: { display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', marginBottom: 24 },

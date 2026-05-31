@@ -184,7 +184,7 @@ export default function NoteEditorPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: { display: 'flex', flexDirection: 'column', flex: 1, background: '#0f172a', color: '#f8fafc' },
+  container: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, background: '#0f172a', color: '#f8fafc', overflowY: 'auto' },
   toolbar: { display: 'flex', alignItems: 'center', gap: 12, padding: '1rem 1.5rem', background: '#1e293b', borderBottom: '1px solid #334155' },
   backBtn: { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 14 },
   titleInput: { flex: 1, background: 'none', border: 'none', color: '#f8fafc', fontSize: 18, fontWeight: 700, outline: 'none' },

@@ -9,7 +9,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#0f172a', color: '#f8fafc' }}>
       <Sidebar />
-      <main style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+      <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {children}
       </main>
     </div>

@@ -1,0 +1,49 @@
+﻿services:
+  mysql:
+    image: mysql:8.4
+    container_name: sntllm-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass
+      MYSQL_DATABASE: somenotetakingllm
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$${MYSQL_USER} -p$${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    container_name: sntllm-api
+    build:
+      context: ./SRC/SomeNoteTakingLLM.Api
+      dockerfile: Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: Server=mysql;Port=3306;Database=somenotetakingllm;User ID=app_user;Password=app_pass;
+      Jwt__SecretKey: SomeNoteTakingLLM_SuperSecretKey_MinLength32Chars!
+      Jwt__Issuer: SomeNoteTakingLLM
+      Jwt__Audience: SomeNoteTakingLLM.Clients
+      Jwt__AccessTokenExpirationMinutes: "60"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  web:
+    container_name: sntllm-web
+    build:
+      context: ./SRC/sntllm-web
+      dockerfile: Dockerfile
+    depends_on:
+      - api
+    ports:
+      - "3000:80"
+
+volumes:
+  mysql_data:

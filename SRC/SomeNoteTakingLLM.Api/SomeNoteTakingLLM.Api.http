@@ -1,0 +1,6 @@
+@SomeNoteTakingLLM.Api_HostAddress = http://localhost:5215
+
+GET {{SomeNoteTakingLLM.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

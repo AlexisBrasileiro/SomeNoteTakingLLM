@@ -18,7 +18,7 @@ export default function NoteEditorPage() {
   const isNew = id === 'new'
   const navigate = useNavigate()
   const location = useLocation()
-  const navState = (location.state as { projectId?: string; noteType?: NoteType; date?: string } | null)
+    const navState = (location.state as { projectId?: string; noteType?: NoteType; date?: string; parentNoteId?: string } | null)
   const presetProjectId = navState?.projectId ?? ''
   const { refresh: refreshSidebar } = useSidebarRefresh()
 
@@ -28,7 +28,7 @@ export default function NoteEditorPage() {
   const [content, setContent] = useState('')
   const [projectId, setProjectId] = useState(presetProjectId)
   const [noteDate, setNoteDate] = useState(navState?.date ?? todayIso)
-  const [parentNoteId, setParentNoteId] = useState('')
+    const [parentNoteId, setParentNoteId] = useState(navState?.parentNoteId ?? '')
   const [noteType, setNoteType] = useState<NoteType>(navState?.noteType ?? 0)
   const [projects, setProjects] = useState<Project[]>([])
   const [notes, setNotes] = useState<Note[]>([])

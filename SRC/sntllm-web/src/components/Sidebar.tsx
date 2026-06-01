@@ -189,6 +189,28 @@ function NoteRow({ note, indent, noteOpen, onToggle, dragHandlers }: {
           {note.title || 'Sem título'}
         </span>
       </div>
+              <button
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isActive ? '#fff' : '#cbd5e1',
+                  cursor: 'pointer',
+                  fontSize: 16,
+                  padding: '0 4px',
+                  marginLeft: 'auto',
+                  lineHeight: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onClick={e => {
+                  e.stopPropagation()
+                  navigate('/notes/new', { state: { parentNoteId: note.id, projectId: note.projectId } })
+                }}
+                title="Adicionar nota aninhada"
+              >
+                +
+              </button>
       {open && note.children.map(c => (
         <NoteRow key={c.id} note={c} indent={indent + 12} noteOpen={noteOpen} onToggle={onToggle} dragHandlers={dragHandlers} />
       ))}

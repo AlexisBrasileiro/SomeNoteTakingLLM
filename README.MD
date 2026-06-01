@@ -95,6 +95,42 @@ To stop the environment:
 docker compose down
 ```
 
+## Persistent Data — Volume Mapping
+
+MySQL and ChromaDB data are mapped to host directories so the data survives container restarts and is easy to back up or migrate.
+
+The default placeholder paths in `docker-compose.yml` are:
+
+| Service  | Host path              | Container path      |
+|----------|------------------------|---------------------|
+| MySQL    | `/mnt/tmp/tst/mysql`   | `/var/lib/mysql`    |
+| ChromaDB | `/mnt/tmp/tst/chroma`  | `/chroma/chroma`    |
+
+**Before running for the first time**, replace the placeholder with the actual path where you want to store the data:
+
+```yaml
+# docker-compose.yml — example with custom paths
+volumes:
+  - /data/sntllm/mysql:/var/lib/mysql   # MySQL
+  - /data/sntllm/chroma:/chroma/chroma  # ChromaDB
+```
+
+On Linux / macOS, create the directories if they do not exist:
+
+```bash
+mkdir -p /data/sntllm/mysql /data/sntllm/chroma
+```
+
+On Windows (WSL2 or Docker Desktop), use a local path:
+
+```yaml
+volumes:
+  - C:/sntllm/mysql:/var/lib/mysql
+  - C:/sntllm/chroma:/chroma/chroma
+```
+
+> The directories must exist and be writable before running `docker compose up`.
+
 ## Multi-Architecture Build
 
 Images are built for `linux/amd64` (x86) and `linux/arm64` (Raspberry Pi, Apple Silicon, ARM servers) using Docker Buildx.

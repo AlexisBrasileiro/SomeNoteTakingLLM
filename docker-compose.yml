@@ -10,7 +10,7 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - /mnt/tmp/tst/mysql:/var/lib/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$${MYSQL_USER} -p$${MYSQL_PASSWORD}"]
       interval: 10s
@@ -28,7 +28,7 @@ services:
     ports:
       - "8100:8000"
     volumes:
-      - chroma_data:/chroma/chroma
+      - /mnt/tmp/tst/chroma:/chroma/chroma
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
       interval: 15s
@@ -76,6 +76,4 @@ services:
     ports:
       - "3000:80"
 
-volumes:
-  mysql_data:
-  chroma_data:
+# Volumes are mapped to host paths above. No named volumes needed.

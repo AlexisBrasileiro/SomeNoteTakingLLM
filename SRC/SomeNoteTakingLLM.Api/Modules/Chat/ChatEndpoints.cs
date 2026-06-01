@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SomeNoteTakingLLM.Api.Data;
 using SomeNoteTakingLLM.Api.Domain;
+using SomeNoteTakingLLM.Api.Infrastructure;
 
 namespace SomeNoteTakingLLM.Api.Modules.Chat;
 
@@ -160,7 +161,8 @@ public static class ChatEndpoints
         Guid id,
         SendMessageRequest request,
         ClaimsPrincipal user,
-        SomeNoteTakingLlmDbContext db)
+        SomeNoteTakingLlmDbContext db,
+        ChromaService chroma)
     {
         var ownerId = GetUserId(user);
         var note = await db.Notes.FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId && n.NoteType == NoteType.Chat);
@@ -199,7 +201,8 @@ public static class ChatEndpoints
         // 4. Fetch Ollama config
         var ollamaSettings = await db.AppSettings
             .Where(s => s.Key == "llm.primary.url" || s.Key == "llm.primary.model"
-                     || s.Key == "llm.fallback.enabled" || s.Key == "llm.fallback.url" || s.Key == "llm.fallback.model")
+                     || s.Key == "llm.fallback.enabled" || s.Key == "llm.fallback.url" || s.Key == "llm.fallback.model"
+                     || s.Key == "llm.embedding.model")
             .ToListAsync();
 
         var ollamaUrl = ollamaSettings.FirstOrDefault(s => s.Key == "llm.primary.url")?.Value;
@@ -207,6 +210,7 @@ public static class ChatEndpoints
         var fallbackEnabled = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.enabled")?.Value == "true";
         var fallbackUrl   = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.url")?.Value;
         var fallbackModel = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.model")?.Value;
+        var embeddingModel = ollamaSettings.FirstOrDefault(s => s.Key == "llm.embedding.model")?.Value ?? "nomic-embed-text";
 
         if (string.IsNullOrWhiteSpace(ollamaUrl))
             return Results.BadRequest(new { message = "Ollama não configurado. Configure a URL primária em Configurações → LLM." });
@@ -216,7 +220,8 @@ public static class ChatEndpoints
         // 5. Build full context (user refs + automatic project context)
         var contextString = await BuildContextAsync(
             db, ownerId, allRefs,
-            note.ProjectId, request.ContextDays ?? 90);
+            note.ProjectId, request.ContextDays ?? 90,
+            request.Content, chroma, ollamaUrl, embeddingModel);
 
         // 6. Build system prompt + Ollama messages
         var systemContent = "Você é um assistente inteligente de anotações. Responda de forma clara, precisa e útil.";
@@ -293,7 +298,8 @@ public static class ChatEndpoints
         Guid id,
         HttpContext httpContext,
         ClaimsPrincipal user,
-        SomeNoteTakingLlmDbContext db)
+        SomeNoteTakingLlmDbContext db,
+        ChromaService chroma)
     {
         var ownerId = GetUserId(user);
         var request = await httpContext.Request.ReadFromJsonAsync<SendMessageRequest>(JsonOpts);
@@ -364,7 +370,8 @@ public static class ChatEndpoints
         // 3. Ollama config
         var ollamaSettings = await db.AppSettings
             .Where(s => s.Key == "llm.primary.url" || s.Key == "llm.primary.model"
-                     || s.Key == "llm.fallback.enabled" || s.Key == "llm.fallback.url" || s.Key == "llm.fallback.model")
+                     || s.Key == "llm.fallback.enabled" || s.Key == "llm.fallback.url" || s.Key == "llm.fallback.model"
+                     || s.Key == "llm.embedding.model")
             .ToListAsync();
 
         var ollamaUrl   = ollamaSettings.FirstOrDefault(s => s.Key == "llm.primary.url")?.Value;
@@ -372,6 +379,7 @@ public static class ChatEndpoints
         var fallbackEnabled = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.enabled")?.Value == "true";
         var fallbackUrl   = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.url")?.Value;
         var fallbackModel = ollamaSettings.FirstOrDefault(s => s.Key == "llm.fallback.model")?.Value;
+        var embeddingModel = ollamaSettings.FirstOrDefault(s => s.Key == "llm.embedding.model")?.Value ?? "nomic-embed-text";
 
         if (string.IsNullOrWhiteSpace(ollamaUrl))
         {
@@ -383,7 +391,8 @@ public static class ChatEndpoints
         // 4. Build full context (user refs + automatic project context)
         var contextString = await BuildContextAsync(
             db, ownerId, allRefs,
-            note.ProjectId, request.ContextDays ?? 90);
+            note.ProjectId, request.ContextDays ?? 90,
+            request.Content, chroma, ollamaUrl, embeddingModel);
 
         // 5. Build Ollama messages
         var systemContent = "Você é um assistente inteligente de anotações. Responda de forma clara, precisa e útil.";
@@ -491,9 +500,14 @@ public static class ChatEndpoints
         Guid ownerId,
         List<ChatReference> userRefs,
         Guid? projectId,
-        int contextDays)
+        int contextDays,
+        string userQuery,
+        ChromaService chroma,
+        string ollamaUrl,
+        string embeddingModel)
     {
         var sb = new StringBuilder();
+        var allNoteIds = new HashSet<Guid>();
 
         // Load Paperless settings once
         var plSettings = await db.AppSettings
@@ -515,6 +529,7 @@ public static class ChatEndpoints
                 if (refItem.Type == "note" && Guid.TryParse(refItem.Id, out var nid))
                 {
                     refNoteIds.Add(nid);
+                    allNoteIds.Add(nid);
                     var refNote = await db.Notes.FirstOrDefaultAsync(n => n.Id == nid && n.OwnerId == ownerId);
                     if (refNote is not null)
                     {
@@ -594,6 +609,7 @@ public static class ChatEndpoints
                     sb.AppendLine();
                     foreach (var pn in projectNotes)
                     {
+                        allNoteIds.Add(pn.Id);
                         sb.AppendLine($"### {pn.Title ?? "Sem título"} (atualizado {pn.UpdatedAt:dd/MM/yyyy})");
                         if (!string.IsNullOrWhiteSpace(pn.Content)) sb.AppendLine(pn.Content);
                         sb.AppendLine();
@@ -633,6 +649,27 @@ public static class ChatEndpoints
                         }
                     }
                     catch { /* silently skip */ }
+                }
+            }
+        }
+
+        // Semantic search via ChromaDB
+        if (!string.IsNullOrWhiteSpace(userQuery) && !string.IsNullOrWhiteSpace(ollamaUrl))
+        {
+            var chromaResults = await chroma.SearchAsync(userQuery, ownerId, projectId, ollamaUrl, embeddingModel, topK: 5);
+            var alreadyIncluded = new HashSet<string>(allNoteIds.Select(id => id.ToString()));
+            var semanticNotes = chromaResults
+                .Where(r => !alreadyIncluded.Contains(r.Id) && r.Distance < 0.9f)
+                .ToList();
+            if (semanticNotes.Count > 0)
+            {
+                sb.AppendLine("\n### Notas semanticamente relevantes:");
+                foreach (var r in semanticNotes)
+                {
+                    sb.AppendLine($"**{r.Title}** (relevância: {(1f - r.Distance):P0})");
+                    var snippet = r.Document.Length > 500 ? r.Document[..500] + "…" : r.Document;
+                    sb.AppendLine(snippet);
+                    sb.AppendLine("---");
                 }
             }
         }

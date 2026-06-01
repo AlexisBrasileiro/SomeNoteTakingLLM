@@ -405,6 +405,7 @@ function ThemeTab() {
 function LlmTab() {
   const [primaryUrl, setPrimaryUrl] = useState('http://localhost:11434')
   const [primaryModel, setPrimaryModel] = useState('llama3')
+  const [embeddingModel, setEmbeddingModel] = useState('nomic-embed-text')
   const [fallbackEnabled, setFallbackEnabled] = useState(false)
   const [fallbackUrl, setFallbackUrl] = useState('')
   const [fallbackModel, setFallbackModel] = useState('')
@@ -412,6 +413,7 @@ function LlmTab() {
   const [fallbackStatus, setFallbackStatus] = useState<'idle' | 'ok' | 'error'>('idle')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const [chromaSyncing, setChromaSyncing] = useState(false)
   const t = useT()
 
   useEffect(() => {
@@ -419,6 +421,7 @@ function LlmTab() {
       const d = r.data
       if (d['llm.primary.url']) setPrimaryUrl(d['llm.primary.url'])
       if (d['llm.primary.model']) setPrimaryModel(d['llm.primary.model'])
+      if (d['llm.embedding.model']) setEmbeddingModel(d['llm.embedding.model'])
       if (d['llm.fallback.enabled']) setFallbackEnabled(d['llm.fallback.enabled'] === 'true')
       if (d['llm.fallback.url']) setFallbackUrl(d['llm.fallback.url'])
       if (d['llm.fallback.model']) setFallbackModel(d['llm.fallback.model'])
@@ -442,6 +445,7 @@ function LlmTab() {
         settings: {
           'llm.primary.url': primaryUrl,
           'llm.primary.model': primaryModel,
+          'llm.embedding.model': embeddingModel,
           'llm.fallback.enabled': String(fallbackEnabled),
           'llm.fallback.url': fallbackUrl,
           'llm.fallback.model': fallbackModel,
@@ -452,6 +456,18 @@ function LlmTab() {
       setMsg(t('common.saveError'))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const syncChroma = async () => {
+    setChromaSyncing(true)
+    try {
+      const r = await api.post<{ synced: number }>('/api/v1/admin/chroma/sync', {})
+      setMsg(`${t('admin.chroma.syncDone')} (${r.data.synced})`)
+    } catch {
+      setMsg(t('common.error'))
+    } finally {
+      setChromaSyncing(false)
     }
   }
 
@@ -468,6 +484,10 @@ function LlmTab() {
         {primaryStatus === 'ok' && <span style={{ color: 'var(--success)' }}>✅ {t('settings.llm.connected')}</span>}
         {primaryStatus === 'error' && <span style={{ color: 'var(--danger)' }}>❌ {t('common.error')}</span>}
       </div>
+
+      <label style={s.label}>{t('settings.llm.embeddingModel')}</label>
+      <input style={s.input} value={embeddingModel} onChange={e => setEmbeddingModel(e.target.value)} placeholder="nomic-embed-text" />
+      <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>{t('settings.llm.embeddingModelHint')}</div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0 8px' }}>
         <label style={{ ...s.label, margin: 0 }}>{t('settings.llm.enableFallback')}</label>
@@ -489,7 +509,12 @@ function LlmTab() {
         </div>
       )}
 
-      <button style={s.accentBtn} onClick={save} disabled={saving}>{saving ? t('common.saving') : `💾 ${t('common.save')}`}</button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button style={s.accentBtn} onClick={save} disabled={saving}>{saving ? t('common.saving') : `💾 ${t('common.save')}`}</button>
+        <button style={s.btn} onClick={syncChroma} disabled={chromaSyncing}>
+          🔄 {chromaSyncing ? t('admin.chroma.syncing') : t('admin.chroma.sync')}
+        </button>
+      </div>
     </div>
   )
 }

@@ -33,7 +33,7 @@ export interface Note {
 }
 
 export interface ChatReference {
-  type: 'note' | 'paperless_document' | 'paperless_tag'
+  type: 'note' | 'paperless_document' | 'paperless_tag' | 'web'
   id: string
   title: string
 }

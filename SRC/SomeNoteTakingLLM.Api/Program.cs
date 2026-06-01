@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Security.Claims;
+using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -12,6 +13,7 @@ using SomeNoteTakingLLM.Api.Modules.Chat;
 using SomeNoteTakingLLM.Api.Modules.Notes;
 using SomeNoteTakingLLM.Api.Modules.Paperless;
 using SomeNoteTakingLLM.Api.Modules.Projects;
+using SomeNoteTakingLLM.Api.Modules.Search;
 using SomeNoteTakingLLM.Api.Modules.Setup;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -50,6 +52,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddAuthorization();
 builder.Services.AddSingleton<JwtService>();
 builder.Services.AddSingleton<StartupTracker>();
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<ChromaService>();
 
 builder.Services.AddCors(options =>
 {
@@ -104,5 +108,23 @@ app.MapSetupEndpoints();
 app.MapAdminEndpoints();
 app.MapPaperlessEndpoints();
 app.MapChatEndpoints();
+app.MapSearchEndpoints();
+
+// Admin: re-sync all notes to ChromaDB
+app.MapPost("/api/v1/admin/chroma/sync", async (
+    ClaimsPrincipal user,
+    SomeNoteTakingLlmDbContext db,
+    ChromaService chroma,
+    IConfiguration config) =>
+{
+    if (!user.IsInRole("Admin")) return Results.Forbid();
+    var ollamaUrl = (await db.AppSettings.FindAsync("llm.primary.url"))?.Value;
+    var embModel  = (await db.AppSettings.FindAsync("llm.embedding.model"))?.Value ?? "nomic-embed-text";
+    if (string.IsNullOrWhiteSpace(ollamaUrl))
+        return Results.BadRequest(new { message = "Ollama URL not configured." });
+    var notes = await db.Notes.Where(n => n.NoteType != SomeNoteTakingLLM.Api.Domain.NoteType.Chat).ToListAsync();
+    var count = await chroma.SyncAllNotesAsync(notes, ollamaUrl, embModel);
+    return Results.Ok(new { synced = count });
+}).RequireAuthorization().WithTags("Admin");
 
 app.Run();

@@ -3,6 +3,7 @@ using System.IdentityModel.Tokens.Jwt;
 using Microsoft.EntityFrameworkCore;
 using SomeNoteTakingLLM.Api.Data;
 using SomeNoteTakingLLM.Api.Domain;
+using SomeNoteTakingLLM.Api.Infrastructure;
 
 namespace SomeNoteTakingLLM.Api.Modules.Notes;
 
@@ -61,7 +62,7 @@ public static class NoteEndpoints
         return Results.Ok(notes);
     }
 
-    private static async Task<IResult> Create(CreateNoteRequest request, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db)
+    private static async Task<IResult> Create(CreateNoteRequest request, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db, ChromaService chroma, IConfiguration config)
     {
         var ownerId = GetUserId(user);
         int depth = 0;
@@ -132,10 +133,11 @@ public static class NoteEndpoints
         };
         db.Notes.Add(note);
         await db.SaveChangesAsync();
+        _ = Task.Run(() => SyncToChromaAsync(note, db, chroma, config));
         return Results.Created($"/api/v1/notes/{note.Id}", ToResponse(note));
     }
 
-    private static async Task<IResult> Update(Guid id, UpdateNoteRequest request, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db)
+    private static async Task<IResult> Update(Guid id, UpdateNoteRequest request, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db, ChromaService chroma, IConfiguration config)
     {
         var ownerId = GetUserId(user);
         var note = await db.Notes.FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId);
@@ -147,6 +149,7 @@ public static class NoteEndpoints
         note.NoteType = request.NoteType;
         note.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
+        _ = Task.Run(() => SyncToChromaAsync(note, db, chroma, config));
         return Results.Ok(ToResponse(note));
     }
 
@@ -162,7 +165,7 @@ public static class NoteEndpoints
         return Results.Ok(ToResponse(note));
     }
 
-    private static async Task<IResult> Delete(Guid id, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db)
+    private static async Task<IResult> Delete(Guid id, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db, ChromaService chroma)
     {
         var ownerId = GetUserId(user);
         var note = await db.Notes.FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId);
@@ -174,6 +177,19 @@ public static class NoteEndpoints
 
         db.Notes.Remove(note);
         await db.SaveChangesAsync();
+        _ = Task.Run(() => chroma.DeleteNoteAsync(id));
         return Results.NoContent();
+    }
+
+    private static async Task SyncToChromaAsync(Note note, SomeNoteTakingLlmDbContext db, ChromaService chroma, IConfiguration config)
+    {
+        try
+        {
+            var ollamaUrl = (await db.AppSettings.FindAsync("llm.primary.url"))?.Value;
+            var embModel  = (await db.AppSettings.FindAsync("llm.embedding.model"))?.Value ?? "nomic-embed-text";
+            if (!string.IsNullOrWhiteSpace(ollamaUrl))
+                await chroma.UpsertNoteAsync(note, ollamaUrl, embModel);
+        }
+        catch { /* best effort */ }
     }
 }

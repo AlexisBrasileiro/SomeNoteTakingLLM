@@ -22,6 +22,13 @@ interface PaperlessTag { id: number; name: string }
 interface PaperlessDoc { id: number; title: string; original_file_name?: string }
 interface DocumentQueryResult { strategy: string; strategyLabel: string; documents: PaperlessDoc[] }
 
+interface WebSearchResult {
+  url: string
+  title: string
+  content: string
+  engine: string
+}
+
 type SendStatus = 'idle' | 'preparing' | 'thinking' | 'streaming' | 'error'
 
 function ThinkingIndicator({ status }: { status: SendStatus }) {
@@ -275,6 +282,7 @@ export default function ChatPage() {
   const [chat, setChat]                 = useState<ChatDetail | null>(null)
   const [loadError, setLoadError]       = useState<string | null>(null)
   const [isLoading, setIsLoading]       = useState(false)
+  const [deleting, setDeleting]         = useState(false)
 
   const [newTitle, setNewTitle]         = useState('')
   const [newProjectId, setNewProjectId] = useState('')
@@ -290,13 +298,23 @@ export default function ChatPage() {
   const [refsPanelOpen, setRefsPanelOpen] = useState(false)
   const [inputError, setInputError] = useState(false)
 
+  const [webSearchOpen, setWebSearchOpen]       = useState(false)
+  const [webSearchQ, setWebSearchQ]             = useState('')
+  const [webSearchResults, setWebSearchResults] = useState<WebSearchResult[]>([])
+  const [webSearching, setWebSearching]         = useState(false)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
 
   const isSending = sendStatus === 'preparing' || sendStatus === 'thinking' || sendStatus === 'streaming'
 
   useEffect(() => {
-    api.get<Project[]>('/projects').then(r => setProjects(r.data)).catch(() => {})
+    api.get<Project[]>('/projects').then(r => {
+      setProjects(r.data)
+      // Pre-select Particular project when creating new items
+      const particular = r.data.find(p => p.name.startsWith('Particular.') || p.name === 'Particular')
+      if (particular) setNewProjectId(particular.id)
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -335,6 +353,19 @@ export default function ChatPage() {
       await api.patch('/chats/' + chat.id, { projectId: projectId || null })
       setChat(prev => prev ? { ...prev, projectId: projectId || null } : prev)
     } catch { /* ignore */ }
+  }
+
+  async function handleDelete() {
+    if (!chat) return
+    if (!window.confirm(t('chat.toolbar.deleteConfirm'))) return
+    setDeleting(true)
+    try {
+      await api.delete('/chats/' + chat.id)
+      refreshSidebar()
+      navigate('/chat/new', { replace: true })
+    } catch {
+      setDeleting(false)
+    }
   }
 
   async function handleSend() {
@@ -459,6 +490,24 @@ export default function ChatPage() {
     setSelectedRefs(prev => prev.filter(r => !(r.type === ref.type && r.id === ref.id)))
   }
 
+  const doWebSearch = async () => {
+    if (!webSearchQ.trim()) return
+    setWebSearching(true)
+    try {
+      const r = await api.get<{ results: WebSearchResult[] }>(`/search?q=${encodeURIComponent(webSearchQ)}`)
+      setWebSearchResults(r.data.results ?? [])
+    } catch {
+      setWebSearchResults([])
+    } finally {
+      setWebSearching(false)
+    }
+  }
+
+  const addWebRef = (result: WebSearchResult) => {
+    const ref: ChatReference = { type: 'web', id: result.url, title: result.title }
+    if (!selectedRefs.find(r => r.id === ref.id)) setSelectedRefs(prev => [...prev, ref])
+  }
+
   // ── New Chat Form ─────────────────────────────────────────────────────────
 
   if (isNew) {
@@ -536,6 +585,14 @@ export default function ChatPage() {
                 {new Set((chat?.messages ?? []).flatMap(m => m.references ?? []).map(r => r.type + ':' + r.id)).size}
               </span>
             )}
+          </button>
+          <button
+            style={{ ...S.iconBtn, color: '#f87171' }}
+            onClick={handleDelete}
+            disabled={deleting || isSending}
+            title={t('chat.toolbar.delete')}
+          >
+            🗑️
           </button>
         </div>
 
@@ -619,6 +676,44 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
+
+              {webSearchOpen && (
+                <div style={WS.panel}>
+                  <div style={WS.header}>
+                    <span style={WS.title}>{t('chat.search.title')}</span>
+                    <button style={WS.closeBtn} onClick={() => { setWebSearchOpen(false); setWebSearchResults([]) }}>✕</button>
+                  </div>
+                  <div style={WS.searchRow}>
+                    <input
+                      style={WS.input}
+                      placeholder={t('chat.search.placeholder')}
+                      value={webSearchQ}
+                      onChange={e => setWebSearchQ(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && doWebSearch()}
+                      autoFocus
+                    />
+                    <button style={WS.btn} onClick={doWebSearch} disabled={webSearching}>
+                      {webSearching ? '...' : t('chat.search.btn')}
+                    </button>
+                  </div>
+                  <div style={WS.results}>
+                    {webSearchResults.length === 0 && !webSearching && webSearchQ && (
+                      <div style={WS.hint}>{t('chat.search.noResults')}</div>
+                    )}
+                    {webSearchResults.map((r, i) => (
+                      <div key={i} style={WS.resultItem}>
+                        <div style={WS.resultTitle}>{r.title}</div>
+                        <div style={WS.resultUrl}>{r.url}</div>
+                        {r.content && <div style={WS.resultSnippet}>{r.content.slice(0, 200)}</div>}
+                        <button style={WS.addBtn} onClick={() => addWebRef(r)}>
+                          + {t('chat.search.addRef')}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <form
                 style={S.inputRow}
                 onSubmit={e => {
@@ -634,6 +729,15 @@ export default function ChatPage() {
                   disabled={isSending}
                 >
                   {t('chat.input.addRef')}
+                </button>
+                <button
+                  type="button"
+                  style={{ ...S.addRefBtn, marginLeft: 4 }}
+                  onClick={() => setWebSearchOpen(o => !o)}
+                  disabled={isSending}
+                  title={t('chat.search.title')}
+                >
+                  🌐
                 </button>
                 <textarea
                   ref={textareaRef}
@@ -889,4 +993,41 @@ const M: Record<string, React.CSSProperties> = {
   itemAdded: { color: '#475569', cursor: 'default' },
   checkmark: { color: '#22c55e', fontWeight: 700 },
   hint: { color: '#475569', fontSize: 13, padding: '16px', textAlign: 'center' },
+}
+
+const WS: Record<string, React.CSSProperties> = {
+  panel: {
+    background: '#0f172a', border: '1px solid #334155', borderRadius: 8,
+    display: 'flex', flexDirection: 'column', gap: 0, marginBottom: 4,
+    maxHeight: 300, overflow: 'hidden',
+  },
+  header: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '8px 12px', borderBottom: '1px solid #1e293b',
+  },
+  title:    { fontSize: 12, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' as const },
+  closeBtn: { background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 13 },
+  searchRow: { display: 'flex', gap: 6, padding: '8px 10px', borderBottom: '1px solid #1e293b' },
+  input: {
+    flex: 1, background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
+    color: '#f8fafc', fontSize: 13, padding: '5px 8px', outline: 'none',
+  },
+  btn: {
+    background: '#6366f1', border: 'none', color: '#fff', borderRadius: 6,
+    padding: '5px 12px', cursor: 'pointer', fontSize: 12, flexShrink: 0,
+  },
+  results: { overflowY: 'auto' as const, flex: 1, maxHeight: 200 },
+  hint: { color: '#475569', fontSize: 12, padding: '10px 12px', textAlign: 'center' as const },
+  resultItem: {
+    padding: '8px 12px', borderBottom: '1px solid #1e293b',
+    display: 'flex', flexDirection: 'column' as const, gap: 3,
+  },
+  resultTitle: { fontSize: 13, color: '#e2e8f0', fontWeight: 600 },
+  resultUrl:   { fontSize: 11, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const },
+  resultSnippet: { fontSize: 12, color: '#94a3b8', lineHeight: 1.4 },
+  addBtn: {
+    background: 'none', border: '1px solid #334155', color: '#6366f1',
+    borderRadius: 4, padding: '2px 8px', cursor: 'pointer', fontSize: 11,
+    alignSelf: 'flex-start' as const, marginTop: 2,
+  },
 }

@@ -91,6 +91,8 @@ const pt_BR: Record<string, string> = {
   'chat.toolbar.ctx90':      '🕐 90 dias',
   'chat.toolbar.ctx180':     '🕐 180 dias',
   'chat.toolbar.ctx365':     '🕐 1 ano',
+  'chat.toolbar.delete':     'Excluir chat',
+  'chat.toolbar.deleteConfirm': 'Tem certeza que deseja excluir este chat? Esta ação não pode ser desfeita.',
   'chat.status.preparing':   '⏳ Preparando contexto...',
   'chat.status.streaming':   '✍️ Respondendo...',
   'chat.messages.empty':     'Envie uma mensagem para começar.',
@@ -252,6 +254,19 @@ const pt_BR: Record<string, string> = {
   'settings.paperless.loadTags':        'Carregar tags',
   'settings.paperless.loadTagsError':   'Erro ao carregar tags do Paperless.',
   'common.saveError':                   'Erro ao salvar.',
+
+  'sidebar.searxng':                     'SearxNG',
+  'chat.search.title':                   'Pesquisa Web',
+  'chat.search.placeholder':             'Pesquisar na web...',
+  'chat.search.btn':                     'Buscar',
+  'chat.search.addRef':                  'Adicionar referência',
+  'chat.search.noResults':               'Nenhum resultado encontrado',
+  'chat.search.error':                   'Erro ao buscar',
+  'settings.llm.embeddingModel':         'Modelo de embedding (ChromaDB)',
+  'settings.llm.embeddingModelHint':     'Ex: nomic-embed-text (requer pull no Ollama)',
+  'admin.chroma.sync':                   'Sincronizar notas no ChromaDB',
+  'admin.chroma.syncing':                'Sincronizando...',
+  'admin.chroma.syncDone':               'Sincronização concluída!',
 }
 
 const en_US: Record<string, string> = {
@@ -331,6 +346,8 @@ const en_US: Record<string, string> = {
   'chat.toolbar.ctx90':      '🕐 90 days',
   'chat.toolbar.ctx180':     '🕐 180 days',
   'chat.toolbar.ctx365':     '🕐 1 year',
+  'chat.toolbar.delete':     'Delete chat',
+  'chat.toolbar.deleteConfirm': 'Are you sure you want to delete this chat? This action cannot be undone.',
   'chat.status.preparing':   '⏳ Preparing context...',
   'chat.status.streaming':   '✍️ Responding...',
   'chat.messages.empty':     'Send a message to start.',
@@ -489,6 +506,19 @@ const en_US: Record<string, string> = {
   'settings.paperless.loadTags':        'Load tags',
   'settings.paperless.loadTagsError':   'Error loading Paperless tags.',
   'common.saveError':                   'Error saving.',
+
+  'sidebar.searxng':                     'SearxNG',
+  'chat.search.title':                   'Web Search',
+  'chat.search.placeholder':             'Search the web...',
+  'chat.search.btn':                     'Search',
+  'chat.search.addRef':                  'Add reference',
+  'chat.search.noResults':               'No results found',
+  'chat.search.error':                   'Search error',
+  'settings.llm.embeddingModel':         'Embedding model (ChromaDB)',
+  'settings.llm.embeddingModelHint':     'E.g.: nomic-embed-text (requires Ollama pull)',
+  'admin.chroma.sync':                   'Sync notes to ChromaDB',
+  'admin.chroma.syncing':                'Syncing...',
+  'admin.chroma.syncDone':               'Sync complete!',
 }
 
 const es: Record<string, string> = {
@@ -568,6 +598,8 @@ const es: Record<string, string> = {
   'chat.toolbar.ctx90':      '🕐 90 días',
   'chat.toolbar.ctx180':     '🕐 180 días',
   'chat.toolbar.ctx365':     '🕐 1 año',
+  'chat.toolbar.delete':     'Eliminar chat',
+  'chat.toolbar.deleteConfirm': '¿Seguro que deseas eliminar este chat? Esta acción no se puede deshacer.',
   'chat.status.preparing':   '⏳ Preparando contexto...',
   'chat.status.streaming':   '✍️ Respondiendo...',
   'chat.messages.empty':     'Envía un mensaje para comenzar.',
@@ -726,6 +758,19 @@ const es: Record<string, string> = {
   'settings.paperless.loadTags':        'Cargar tags',
   'settings.paperless.loadTagsError':   'Error al cargar tags de Paperless.',
   'common.saveError':                   'Error al guardar.',
+
+  'sidebar.searxng':                     'SearxNG',
+  'chat.search.title':                   'Búsqueda Web',
+  'chat.search.placeholder':             'Buscar en la web...',
+  'chat.search.btn':                     'Buscar',
+  'chat.search.addRef':                  'Agregar referencia',
+  'chat.search.noResults':               'No se encontraron resultados',
+  'chat.search.error':                   'Error de búsqueda',
+  'settings.llm.embeddingModel':         'Modelo de embedding (ChromaDB)',
+  'settings.llm.embeddingModelHint':     'Ej: nomic-embed-text (requiere pull en Ollama)',
+  'admin.chroma.sync':                   'Sincronizar notas en ChromaDB',
+  'admin.chroma.syncing':                'Sincronizando...',
+  'admin.chroma.syncDone':               '¡Sincronización completada!',
 }
 
 const resources: Record<Lang, Record<string, string>> = { pt_BR, en_US, es }

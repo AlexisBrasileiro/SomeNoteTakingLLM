@@ -410,6 +410,7 @@ export default function Sidebar() {
   const [dragNoteId, setDragNoteId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+  const [searxngUrl, setSearxngUrl] = useState<string | null>(null)
 
   const todayIso = new Date().toISOString().split('T')[0]
 
@@ -419,6 +420,12 @@ export default function Sidebar() {
   }, [])
 
   useEffect(() => { refresh() }, [refresh, version])
+
+  useEffect(() => {
+    api.get<{ searxngUrl: string | null }>('/search/info')
+      .then(r => setSearxngUrl(r.data.searxngUrl || null))
+      .catch(() => {})
+  }, [])
 
   // Auto-expand tree to active note
   useEffect(() => {
@@ -711,6 +718,9 @@ export default function Sidebar() {
           onClick={() => navigate('/notes/new', { state: { projectId: activeProjectId, date: todayIso, noteType: 0 } })}
         >📝 Nova nota</button>
         <button style={s.navBtn} onClick={() => navigate('/chat/new')}>💬 Novo Chat</button>
+        {searxngUrl && (
+          <button style={s.navBtn} onClick={() => window.open(searxngUrl, '_blank')}>🔍 SearxNG</button>
+        )}
         {authUser?.role === 'Admin' && (
           <button style={s.navBtn} onClick={() => navigate('/settings')}>⚙️ Configurações</button>
         )}

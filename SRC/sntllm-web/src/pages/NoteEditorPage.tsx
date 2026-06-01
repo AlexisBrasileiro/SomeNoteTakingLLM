@@ -43,7 +43,14 @@ export default function NoteEditorPage() {
   }
 
   useEffect(() => {
-    api.get<Project[]>('/projects').then(r => setProjects(r.data))
+    api.get<Project[]>('/projects').then(r => {
+      setProjects(r.data)
+      // Pre-select Particular project for new notes (if no preset from navigation state)
+      if (isNew && !presetProjectId) {
+        const particular = r.data.find(p => p.name.startsWith('Particular.') || p.name === 'Particular')
+        if (particular) setProjectId(particular.id)
+      }
+    })
     api.get<Note[]>('/notes').then(r => setNotes(r.data))
     if (!isNew && id) {
       api.get<Note>(`/notes/${id}`).then(r => {

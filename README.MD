@@ -70,7 +70,8 @@ In progress:
 Prerequisite: Docker Desktop running with Linux engine enabled.
 
 ```bash
-docker compose up --build -d
+docker compose pull
+docker compose up -d
 ```
 
 Main entry points:
@@ -78,6 +79,21 @@ Main entry points:
 - Web: http://localhost:3000
 - API: http://localhost:8080/health
 - Database health: http://localhost:8080/health/db
+- SearXNG: http://localhost:8888
+- ChromaDB heartbeat: http://localhost:8100/api/v1/heartbeat
+
+## Docker Hub Images
+
+This repository now consumes published images directly:
+
+- alechizbr/sntllm-api:latest
+- alechizbr/sntllm-web:latest
+
+To stop the environment:
+
+```bash
+docker compose down
+```
 
 ## Multi-Architecture Build
 

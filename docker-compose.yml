@@ -46,10 +46,8 @@ services:
       - ./Scripts/searxng:/etc/searxng:rw
 
   api:
+    image: alechizbr/sntllm-api:latest
     container_name: sntllm-api
-    build:
-      context: ./SRC/SomeNoteTakingLLM.Api
-      dockerfile: Dockerfile
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Default: Server=mysql;Port=3306;Database=somenotetakingllm;User ID=app_user;Password=app_pass;
@@ -63,14 +61,16 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      searxng:
+        condition: service_started
     ports:
       - "8080:8080"
 
   web:
+    image: alechizbr/sntllm-web:latest
     container_name: sntllm-web
-    build:
-      context: ./SRC/sntllm-web
-      dockerfile: Dockerfile
     depends_on:
       - api
     ports:

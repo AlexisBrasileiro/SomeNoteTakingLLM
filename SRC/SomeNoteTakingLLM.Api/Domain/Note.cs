@@ -15,6 +15,7 @@ public sealed class Note
     public DateTime? NoteDate { get; set; }
     public int Depth { get; set; }
     public NoteType NoteType { get; set; } = NoteType.FreeNote;
+    public ICollection<NoteTag> NoteTags { get; set; } = new List<NoteTag>();
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

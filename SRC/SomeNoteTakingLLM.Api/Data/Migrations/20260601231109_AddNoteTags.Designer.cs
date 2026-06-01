@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SomeNoteTakingLLM.Api.Data;
 
@@ -11,9 +12,11 @@ using SomeNoteTakingLLM.Api.Data;
 namespace SomeNoteTakingLLM.Api.Data.Migrations
 {
     [DbContext(typeof(SomeNoteTakingLlmDbContext))]
-    partial class SomeNoteTakingLlmDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260601231109_AddNoteTags")]
+    partial class AddNoteTags
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

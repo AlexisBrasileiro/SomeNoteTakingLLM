@@ -28,6 +28,8 @@ export interface Note {
   noteDate?: string
   depth: number
   noteType: NoteType
+  tags: string[]
+  directTags: string[]
   createdAt: string
   updatedAt: string
 }

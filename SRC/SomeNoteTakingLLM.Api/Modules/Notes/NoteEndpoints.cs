@@ -29,37 +29,202 @@ public static class NoteEndpoints
     private static Guid GetUserId(ClaimsPrincipal user) =>
         Guid.Parse(user.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
 
-    private static NoteResponse ToResponse(Note n) =>
-        new(n.Id, n.OwnerId, n.ProjectId, n.ParentNoteId, n.Title, n.Content, n.NoteDate, n.Depth, n.NoteType, n.CreatedAt, n.UpdatedAt);
+    private static NoteResponse ToResponse(Note n, IReadOnlyList<string> tags) =>
+        new(
+            n.Id,
+            n.OwnerId,
+            n.ProjectId,
+            n.ParentNoteId,
+            n.Title,
+            n.Content,
+            n.NoteDate,
+            n.Depth,
+            n.NoteType,
+            tags,
+            n.NoteTags
+                .Where(noteTag => noteTag.Tag is not null)
+                .Select(noteTag => noteTag.Tag!.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+            n.CreatedAt,
+            n.UpdatedAt);
+
+    private static string NormalizeTag(string value) => value.Trim().ToLowerInvariant();
+
+    private static string[] SanitizeTags(IEnumerable<string>? tags) =>
+        tags?
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Select(tag => tag.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+
+    private static async Task<List<Note>> LoadOwnerNotesAsync(Guid ownerId, SomeNoteTakingLlmDbContext db) =>
+        await db.Notes
+            .Where(note => note.OwnerId == ownerId)
+            .Include(note => note.NoteTags)
+                .ThenInclude(noteTag => noteTag.Tag)
+            .OrderBy(note => note.CreatedAt)
+            .ToListAsync();
+
+    private static IReadOnlyDictionary<Guid, IReadOnlyList<string>> BuildEffectiveTagMap(IEnumerable<Note> notes)
+    {
+        var noteList = notes.ToList();
+        var notesById = noteList.ToDictionary(note => note.Id);
+        var cache = new Dictionary<Guid, IReadOnlyList<string>>();
+
+        IReadOnlyList<string> Resolve(Guid noteId, HashSet<Guid> trail)
+        {
+            if (cache.TryGetValue(noteId, out var cached))
+                return cached;
+
+            if (!notesById.TryGetValue(noteId, out var note) || !trail.Add(noteId))
+                return [];
+
+            var inherited = note.ParentNoteId.HasValue
+                ? Resolve(note.ParentNoteId.Value, trail)
+                : [];
+
+            var combined = inherited
+                .Concat(note.NoteTags
+                    .Select(noteTag => noteTag.Tag?.Name)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Select(name => name!))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            trail.Remove(noteId);
+            cache[noteId] = combined;
+            return combined;
+        }
+
+        foreach (var note in noteList)
+            _ = Resolve(note.Id, []);
+
+        return cache;
+    }
+
+    private static async Task<List<Tag>> EnsureTagsAsync(SomeNoteTakingLlmDbContext db, Guid ownerId, IEnumerable<string>? rawTags)
+    {
+        var sanitizedTags = SanitizeTags(rawTags);
+        if (sanitizedTags.Length == 0)
+            return [];
+
+        var normalizedTags = sanitizedTags.Select(NormalizeTag).ToArray();
+        var existingTags = await db.Tags
+            .Where(tag => tag.OwnerId == ownerId && normalizedTags.Contains(tag.NormalizedName))
+            .ToListAsync();
+
+        var tagsByNormalizedName = existingTags.ToDictionary(tag => tag.NormalizedName, StringComparer.OrdinalIgnoreCase);
+        var result = new List<Tag>(sanitizedTags.Length);
+
+        foreach (var tagName in sanitizedTags)
+        {
+            var normalizedName = NormalizeTag(tagName);
+            if (!tagsByNormalizedName.TryGetValue(normalizedName, out var tag))
+            {
+                tag = new Tag
+                {
+                    Id = Guid.NewGuid(),
+                    OwnerId = ownerId,
+                    Name = tagName,
+                    NormalizedName = normalizedName,
+                    CreatedAt = DateTime.UtcNow,
+                };
+                db.Tags.Add(tag);
+                tagsByNormalizedName[normalizedName] = tag;
+            }
+
+            result.Add(tag);
+        }
+
+        return result;
+    }
+
+    private static async Task SetNoteTagsAsync(Note note, Guid ownerId, IEnumerable<string>? rawTags, SomeNoteTakingLlmDbContext db)
+    {
+        var tags = await EnsureTagsAsync(db, ownerId, rawTags);
+
+        if (note.NoteTags.Count > 0)
+        {
+            db.NoteTags.RemoveRange(note.NoteTags);
+            note.NoteTags.Clear();
+        }
+
+        foreach (var tag in tags)
+        {
+            note.NoteTags.Add(new NoteTag
+            {
+                NoteId = note.Id,
+                Note = note,
+                TagId = tag.Id,
+                Tag = tag,
+            });
+        }
+    }
+
+    private static async Task<NoteResponse?> BuildResponseAsync(Guid ownerId, Guid noteId, SomeNoteTakingLlmDbContext db)
+    {
+        var notes = await LoadOwnerNotesAsync(ownerId, db);
+        var note = notes.FirstOrDefault(candidate => candidate.Id == noteId);
+        if (note is null)
+            return null;
+
+        var tagMap = BuildEffectiveTagMap(notes);
+        return ToResponse(note, tagMap[note.Id]);
+    }
 
     private static async Task<IResult> GetAll(ClaimsPrincipal user, SomeNoteTakingLlmDbContext db,
-        Guid? projectId = null, DateTime? noteDate = null)
+        Guid? projectId = null, DateTime? noteDate = null, string? title = null, string? content = null, string? tag = null)
     {
         var ownerId = GetUserId(user);
-        var query = db.Notes.Where(n => n.OwnerId == ownerId);
-        if (projectId.HasValue) query = query.Where(n => n.ProjectId == projectId);
-        if (noteDate.HasValue) query = query.Where(n => n.NoteDate.HasValue && n.NoteDate.Value.Date == noteDate.Value.Date);
-        var notes = await query.OrderBy(n => n.CreatedAt).Select(n => ToResponse(n)).ToListAsync();
-        return Results.Ok(notes);
+        var notes = await LoadOwnerNotesAsync(ownerId, db);
+        var effectiveTags = BuildEffectiveTagMap(notes);
+        var normalizedTag = string.IsNullOrWhiteSpace(tag) ? null : NormalizeTag(tag);
+
+        var filteredNotes = notes.Where(note =>
+        {
+            if (projectId.HasValue && note.ProjectId != projectId.Value)
+                return false;
+
+            if (noteDate.HasValue && (!note.NoteDate.HasValue || note.NoteDate.Value.Date != noteDate.Value.Date))
+                return false;
+
+            if (!string.IsNullOrWhiteSpace(title) && !(note.Title?.Contains(title, StringComparison.OrdinalIgnoreCase) ?? false))
+                return false;
+
+            if (!string.IsNullOrWhiteSpace(content) && !(note.Content?.Contains(content, StringComparison.OrdinalIgnoreCase) ?? false))
+                return false;
+
+            if (normalizedTag is not null && !effectiveTags[note.Id].Any(value => NormalizeTag(value) == normalizedTag))
+                return false;
+
+            return true;
+        });
+
+        return Results.Ok(filteredNotes.Select(note => ToResponse(note, effectiveTags[note.Id])));
     }
 
     private static async Task<IResult> GetById(Guid id, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db)
     {
         var ownerId = GetUserId(user);
-        var note = await db.Notes.FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId);
-        if (note is null) return Results.NotFound();
-        return Results.Ok(ToResponse(note));
+        var response = await BuildResponseAsync(ownerId, id, db);
+        if (response is null) return Results.NotFound();
+        return Results.Ok(response);
     }
 
     private static async Task<IResult> GetChildren(Guid id, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db)
     {
         var ownerId = GetUserId(user);
-        var notes = await db.Notes
-            .Where(n => n.ParentNoteId == id && n.OwnerId == ownerId)
-            .OrderBy(n => n.CreatedAt)
-            .Select(n => ToResponse(n))
-            .ToListAsync();
-        return Results.Ok(notes);
+        var notes = await LoadOwnerNotesAsync(ownerId, db);
+        var tagMap = BuildEffectiveTagMap(notes);
+        var children = notes
+            .Where(note => note.ParentNoteId == id)
+            .Select(note => ToResponse(note, tagMap[note.Id]))
+            .ToList();
+        return Results.Ok(children);
     }
 
     private static async Task<IResult> Create(CreateNoteRequest request, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db, ChromaService chroma, IConfiguration config)
@@ -131,22 +296,29 @@ public static class NoteEndpoints
             CreatedAt = now,
             UpdatedAt = now
         };
+        await SetNoteTagsAsync(note, ownerId, request.Tags, db);
         db.Notes.Add(note);
         await db.SaveChangesAsync();
         _ = Task.Run(() => SyncToChromaAsync(note, db, chroma, config));
-        return Results.Created($"/api/v1/notes/{note.Id}", ToResponse(note));
+        var response = await BuildResponseAsync(ownerId, note.Id, db);
+        return Results.Created($"/api/v1/notes/{note.Id}", response!);
     }
 
     private static async Task<IResult> Update(Guid id, UpdateNoteRequest request, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db, ChromaService chroma, IConfiguration config)
     {
         var ownerId = GetUserId(user);
-        var note = await db.Notes.FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId);
+        var note = await db.Notes
+            .Include(candidate => candidate.NoteTags)
+                .ThenInclude(noteTag => noteTag.Tag)
+            .FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId);
         if (note is null) return Results.NotFound();
         note.Title = request.Title;
         note.Content = request.Content;
         note.ProjectId = request.ProjectId;
         note.NoteDate = request.NoteDate;
         note.NoteType = request.NoteType;
+            if (request.Tags is not null)
+                await SetNoteTagsAsync(note, ownerId, request.Tags, db);
 
         // Se houve mudança de parent, validar e recalcular profundidade
         if (request.ParentNoteId != note.ParentNoteId)
@@ -179,7 +351,8 @@ public static class NoteEndpoints
         note.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         _ = Task.Run(() => SyncToChromaAsync(note, db, chroma, config));
-        return Results.Ok(ToResponse(note));
+        var response = await BuildResponseAsync(ownerId, note.Id, db);
+        return Results.Ok(response);
     }
 
     private static async Task<IResult> Move(Guid id, MoveNoteRequest request, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db)
@@ -191,7 +364,8 @@ public static class NoteEndpoints
         note.ParentNoteId = request.ParentNoteId;
         note.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
-        return Results.Ok(ToResponse(note));
+        var response = await BuildResponseAsync(ownerId, note.Id, db);
+        return Results.Ok(response);
     }
 
     private static async Task<IResult> Delete(Guid id, ClaimsPrincipal user, SomeNoteTakingLlmDbContext db, ChromaService chroma)

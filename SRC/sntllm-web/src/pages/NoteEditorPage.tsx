@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, type ChangeEvent } from 'react'
+﻿import { useEffect, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import MDEditor from '@uiw/react-md-editor'
 import api from '../api/client'
@@ -30,10 +30,32 @@ export default function NoteEditorPage() {
   const [noteDate, setNoteDate] = useState(navState?.date ?? todayIso)
     const [parentNoteId, setParentNoteId] = useState(navState?.parentNoteId ?? '')
   const [noteType, setNoteType] = useState<NoteType>(navState?.noteType ?? 0)
+  const [tags, setTags] = useState<string[]>([])
+  const [tagInput, setTagInput] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
   const [notes, setNotes] = useState<Note[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const sanitizeTag = (value: string) => value.trim()
+
+  const addTag = (value: string) => {
+    const nextTag = sanitizeTag(value)
+    if (!nextTag) return
+    setTags(current => current.some(tag => tag.toLowerCase() === nextTag.toLowerCase()) ? current : [...current, nextTag])
+    setTagInput('')
+  }
+
+  const removeTag = (tagToRemove: string) => {
+    setTags(current => current.filter(tag => tag !== tagToRemove))
+  }
+
+  const handleTagKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' || event.key === ',') {
+      event.preventDefault()
+      addTag(tagInput)
+    }
+  }
 
   // Ao trocar para CalendarNote, pré-preenche a data com hoje se estiver vazia
   const handleNoteTypeChange = (t: NoteType) => {
@@ -62,6 +84,7 @@ export default function NoteEditorPage() {
         setNoteDate(n.noteDate ? n.noteDate.split('T')[0] : '')
         setParentNoteId(n.parentNoteId ?? '')
         setNoteType(n.noteType)
+        setTags(n.directTags ?? n.tags ?? [])
       })
     }
   }, [id, isNew])
@@ -77,6 +100,7 @@ export default function NoteEditorPage() {
         noteDate: noteDate ? new Date(noteDate).toISOString() : null,
         parentNoteId: parentNoteId || null,
         noteType,
+        tags,
       }
       if (isNew) {
         const r = await api.post<Note>('/notes', payload)
@@ -106,6 +130,10 @@ export default function NoteEditorPage() {
       setError(err.response?.data?.message ?? 'Erro ao excluir.')
     }
   }
+
+  const parentNote = notes.find(note => note.id === parentNoteId)
+  const inheritedTags = parentNote?.tags ?? []
+  const effectiveTags = Array.from(new Set([...inheritedTags, ...tags].map(tag => tag.trim()).filter(Boolean)))
 
   return (
     <AppLayout>
@@ -168,6 +196,44 @@ export default function NoteEditorPage() {
               </select>
             </>
           )}
+
+          <div style={styles.tagsPanel}>
+            <label style={styles.metaLabel}>Tags próprias</label>
+            <div style={styles.tagsComposer}>
+              <input
+                style={styles.tagInput}
+                placeholder="Digite uma tag e pressione Enter"
+                value={tagInput}
+                onChange={e => setTagInput(e.target.value)}
+                onKeyDown={handleTagKeyDown}
+              />
+              <button style={styles.tagAddBtn} type="button" onClick={() => addTag(tagInput)}>Adicionar</button>
+            </div>
+            <div style={styles.tagList}>
+              {tags.length === 0 && <span style={styles.tagHint}>Nenhuma tag própria definida.</span>}
+              {tags.map(tag => (
+                <button key={tag} type="button" style={styles.tagButton} onClick={() => removeTag(tag)}>
+                  #{tag} ×
+                </button>
+              ))}
+            </div>
+            {parentNoteId && inheritedTags.length > 0 && (
+              <div style={styles.inheritanceBox}>
+                <span style={styles.inheritanceTitle}>Tags herdadas da nota pai</span>
+                <div style={styles.tagList}>
+                  {inheritedTags.map(tag => <span key={tag} style={styles.inheritedTag}>#{tag}</span>)}
+                </div>
+              </div>
+            )}
+            {effectiveTags.length > 0 && (
+              <div style={styles.inheritanceBox}>
+                <span style={styles.inheritanceTitle}>Tags efetivas desta nota</span>
+                <div style={styles.tagList}>
+                  {effectiveTags.map(tag => <span key={tag} style={styles.effectiveTag}>#{tag}</span>)}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={styles.editorWrapper}>
@@ -204,5 +270,16 @@ const styles: Record<string, React.CSSProperties> = {
   metaLabel: { color: '#94a3b8', fontSize: 12, fontWeight: 500 },
   select: { padding: '0.4rem 0.75rem', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#f8fafc', fontSize: 13 },
   dateInput: { padding: '0.4rem 0.75rem', background: '#0f172a', border: '1px solid #334155', borderRadius: 6, color: '#f8fafc', fontSize: 13 },
+  tagsPanel: { display: 'flex', flexDirection: 'column', gap: 10, minWidth: 320, flex: '1 1 320px' },
+  tagsComposer: { display: 'flex', gap: 8 },
+  tagInput: { flex: 1, padding: '0.55rem 0.75rem', background: '#0f172a', border: '1px solid #334155', borderRadius: 8, color: '#f8fafc', fontSize: 13 },
+  tagAddBtn: { padding: '0.55rem 0.85rem', background: '#0ea5e9', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer', fontWeight: 600 },
+  tagList: { display: 'flex', flexWrap: 'wrap', gap: 8 },
+  tagButton: { padding: '0.35rem 0.7rem', background: '#7c2d12', border: '1px solid #9a3412', borderRadius: 999, color: '#ffedd5', cursor: 'pointer', fontSize: 12 },
+  tagHint: { color: '#64748b', fontSize: 12 },
+  inheritanceBox: { display: 'flex', flexDirection: 'column', gap: 6, padding: '0.7rem 0.85rem', border: '1px solid #334155', borderRadius: 10, background: '#111827' },
+  inheritanceTitle: { color: '#cbd5e1', fontSize: 12, fontWeight: 600 },
+  inheritedTag: { padding: '0.3rem 0.6rem', background: '#172554', borderRadius: 999, color: '#bfdbfe', fontSize: 12 },
+  effectiveTag: { padding: '0.3rem 0.6rem', background: '#14532d', borderRadius: 999, color: '#dcfce7', fontSize: 12 },
   editorWrapper: { flex: 1, padding: '1rem 1.5rem', display: 'flex', flexDirection: 'column' },
 }

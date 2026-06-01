@@ -13,6 +13,8 @@ public sealed class SomeNoteTakingLlmDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Note> Notes => Set<Note>();
+    public DbSet<Tag> Tags => Set<Tag>();
+    public DbSet<NoteTag> NoteTags => Set<NoteTag>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
 
@@ -34,6 +36,11 @@ public sealed class SomeNoteTakingLlmDbContext : DbContext
             entity.HasMany(user => user.Notes)
                 .WithOne(note => note.Owner)
                 .HasForeignKey(note => note.OwnerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasMany<Tag>()
+                .WithOne(tag => tag.Owner)
+                .HasForeignKey(tag => tag.OwnerId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -65,6 +72,31 @@ public sealed class SomeNoteTakingLlmDbContext : DbContext
             entity.HasIndex(note => note.OwnerId);
             entity.HasIndex(note => note.ProjectId);
             entity.HasIndex(note => note.ParentNoteId);
+        });
+
+        modelBuilder.Entity<Tag>(entity =>
+        {
+            entity.HasKey(tag => tag.Id);
+            entity.Property(tag => tag.Name).HasMaxLength(100).IsRequired();
+            entity.Property(tag => tag.NormalizedName).HasMaxLength(100).IsRequired();
+            entity.HasIndex(tag => new { tag.OwnerId, tag.NormalizedName }).IsUnique();
+        });
+
+        modelBuilder.Entity<NoteTag>(entity =>
+        {
+            entity.HasKey(noteTag => new { noteTag.NoteId, noteTag.TagId });
+
+            entity.HasOne(noteTag => noteTag.Note)
+                .WithMany(note => note.NoteTags)
+                .HasForeignKey(noteTag => noteTag.NoteId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(noteTag => noteTag.Tag)
+                .WithMany(tag => tag.NoteTags)
+                .HasForeignKey(noteTag => noteTag.TagId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(noteTag => noteTag.TagId);
         });
 
         modelBuilder.Entity<AppSetting>(e =>

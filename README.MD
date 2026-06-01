@@ -79,6 +79,31 @@ Main entry points:
 - API: http://localhost:8080/health
 - Database health: http://localhost:8080/health/db
 
+## Multi-Architecture Build
+
+Images are built for `linux/amd64` (x86) and `linux/arm64` (Raspberry Pi, Apple Silicon, ARM servers) using Docker Buildx.
+
+**Local test build** (loads `linux/amd64` into the local daemon):
+
+```powershell
+.\Scripts\build-multiarch.ps1 -Load
+```
+
+**Build and push to a registry:**
+
+```powershell
+.\Scripts\build-multiarch.ps1 -Push -Registry "docker.io/your-user"
+.\Scripts\build-multiarch.ps1 -Push -Registry "ghcr.io/your-user" -Tag "v1.0.0"
+```
+
+**Declarative build via bake** (useful in CI/CD pipelines):
+
+```bash
+REGISTRY=ghcr.io/your-user TAG=v1.0.0 docker buildx bake --push
+```
+
+All base images (`dotnet:9.0`, `node:20-alpine`, `nginx:alpine`) ship official multi-arch manifests, so no Dockerfile changes are needed.
+
 ## Who This Is For
 
 - teams building an internal knowledge base
@@ -98,8 +123,12 @@ Main entry points:
 
 ## Repository Structure
 
-- SRC: backend API and frontend application
-- Scripts: helper scripts for local execution
+- `SRC/SomeNoteTakingLLM.Api` — backend API in C#
+- `SRC/sntllm-web` — frontend React application
+- `Scripts/` — helper scripts for local execution and multi-arch builds
+- `Docs/MD/` — implementation plan and architectural documentation
+- `docker-compose.yml` — local development environment
+- `docker-bake.hcl` — declarative multi-arch build definition
 
 ## Summary Pitch
 

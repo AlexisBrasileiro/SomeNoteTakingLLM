@@ -1,3 +1,5 @@
+name: sntllm
+
 services:
   mysql:
     image: mysql:8.4
@@ -7,8 +9,7 @@ services:
       MYSQL_DATABASE: somenotetakingllm
       MYSQL_USER: app_user
       MYSQL_PASSWORD: app_pass
-    ports:
-      - "3306:3306"
+    # porta não exposta ao host — acessível apenas pela rede interna
     volumes:
       - /mnt/tmp/tst/mysql:/var/lib/mysql
     healthcheck:
@@ -16,6 +17,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - sntllm-net
 
   chromadb:
     image: chromadb/chroma:0.5.23
@@ -25,8 +28,7 @@ services:
       ANONYMIZED_TELEMETRY: "FALSE"
       CHROMA_HOST_ADDR: "0.0.0.0"
       CHROMA_HOST_PORT: "8000"
-    ports:
-      - "8100:8000"
+    # porta não exposta ao host — acessível apenas pela rede interna
     volumes:
       - /mnt/tmp/tst/chroma:/chroma/chroma
     healthcheck:
@@ -34,6 +36,8 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+    networks:
+      - sntllm-net
 
   searxng:
     image: searxng/searxng:latest
@@ -44,6 +48,8 @@ services:
       - "8888:8080"
     volumes:
       - ./Scripts/searxng:/etc/searxng:rw
+    networks:
+      - sntllm-net
 
   api:
     image: alechizbr/sntllm-api:latest
@@ -67,13 +73,21 @@ services:
         condition: service_started
     ports:
       - "8080:8080"
+    networks:
+      - sntllm-net
 
   web:
     image: alechizbr/sntllm-web:latest
     container_name: sntllm-web
     depends_on:
       - api
-    ports:
-      - "3000:80"
+    # porta não exposta ao host — acesso via api (proxy reverso ou mesmo host)
+    networks:
+      - sntllm-net
 
 # Volumes are mapped to host paths above. No named volumes needed.
+
+networks:
+  sntllm-net:
+    name: sntllm-net
+    driver: bridge

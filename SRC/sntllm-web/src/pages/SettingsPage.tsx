@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme, BUILTIN_THEMES, type ThemeDefinition } from '../context/ThemeContext'
+import { useI18n, useT } from '../context/I18nContext'
+import { LANGS } from '../i18n'
 import AppLayout from '../components/AppLayout'
 import api from '../api/client'
 
@@ -25,7 +27,7 @@ interface ProjectSummaryAdmin {
   createdAt: string
 }
 
-type Tab = 'users' | 'projects' | 'theme' | 'llm' | 'paperless'
+type Tab = 'users' | 'projects' | 'theme' | 'llm' | 'paperless' | 'auth' | 'language'
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
@@ -33,6 +35,7 @@ export default function SettingsPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('users')
+  const t = useT()
 
   if (user?.role !== 'Admin') {
     navigate('/', { replace: true })
@@ -42,15 +45,15 @@ export default function SettingsPage() {
   return (
     <AppLayout>
       <div style={s.page}>
-        <h1 style={s.title}>⚙️ Configurações</h1>
+        <h1 style={s.title}>⚙️ {t('settings.title')}</h1>
         <div style={s.tabs}>
-          {(['users', 'projects', 'theme', 'llm', 'paperless'] as Tab[]).map(t => (
+          {(['users', 'projects', 'theme', 'llm', 'paperless', 'auth', 'language'] as Tab[]).map(tb => (
             <button
-              key={t}
-              style={{ ...s.tab, ...(tab === t ? s.tabActive : {}) }}
-              onClick={() => setTab(t)}
+              key={tb}
+              style={{ ...s.tab, ...(tab === tb ? s.tabActive : {}) }}
+              onClick={() => setTab(tb)}
             >
-              {tabLabel(t)}
+              {tabLabel(tb, t)}
             </button>
           ))}
         </div>
@@ -60,14 +63,25 @@ export default function SettingsPage() {
           {tab === 'theme'     && <ThemeTab />}
           {tab === 'llm'       && <LlmTab />}
           {tab === 'paperless' && <PaperlessTab />}
+          {tab === 'auth'      && <AuthTab />}
+          {tab === 'language'  && <LanguageTab />}
         </div>
       </div>
     </AppLayout>
   )
 }
 
-function tabLabel(t: Tab) {
-  return { users: '👤 Usuários', projects: '🗂️ Projetos', theme: '🎨 Personalização', llm: '🤖 LLM (Ollama)', paperless: '📄 Paperless-ng' }[t]
+function tabLabel(tb: Tab, t: (k: string) => string) {
+  const map: Record<Tab, string> = {
+    users: `👤 ${t('settings.tabs.users')}`,
+    projects: `🗂️ ${t('settings.tabs.projects')}`,
+    theme: `🎨 ${t('settings.tabs.theme')}`,
+    llm: `🤖 ${t('settings.tabs.llm')}`,
+    paperless: `📄 ${t('settings.tabs.paperless')}`,
+    auth: `🔐 ${t('settings.tabs.auth')}`,
+    language: `🌐 ${t('settings.tabs.language')}`,
+  }
+  return map[tb]
 }
 
 // ── Users Tab ─────────────────────────────────────────────────────────────────
@@ -76,6 +90,10 @@ function UsersTab() {
   const [users, setUsers] = useState<UserSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
+  const [showCreate, setShowCreate] = useState(false)
+  const [createForm, setCreateForm] = useState({ userName: '', email: '', password: '', role: 'Reader' })
+  const [creating, setCreating] = useState(false)
+  const t = useT()
 
   const load = () => {
     setLoading(true)
@@ -84,37 +102,84 @@ function UsersTab() {
 
   useEffect(() => { load() }, [])
 
+  const createUser = async () => {
+    if (!createForm.userName || !createForm.email || !createForm.password) return
+    setCreating(true)
+    try {
+      await api.post('/admin/users', createForm)
+      setMsg(t('settings.users.created'))
+      setShowCreate(false)
+      setCreateForm({ userName: '', email: '', password: '', role: 'Reader' })
+      load()
+    } catch {
+      setMsg(t('settings.users.createError'))
+    } finally {
+      setCreating(false)
+    }
+  }
+
   const changeRole = async (id: string, role: string) => {
     try {
       await api.put(`/admin/users/${id}/role`, { role })
-      setMsg('Role atualizada.')
+      setMsg(t('settings.users.roleUpdated'))
       load()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } }
-      setMsg(err.response?.data?.message ?? 'Erro ao atualizar role.')
+      setMsg(err.response?.data?.message ?? t('settings.users.roleError'))
     }
   }
 
   const deleteUser = async (id: string, name: string) => {
-    if (!window.confirm(`Excluir usuário "${name}"?`)) return
+    if (!window.confirm(t('settings.users.deleteConfirm', { name }))) return
     try {
       await api.delete(`/admin/users/${id}`)
-      setMsg('Usuário excluído.')
+      setMsg(t('settings.users.deleted'))
       load()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } }
-      setMsg(err.response?.data?.message ?? 'Erro ao excluir.')
+      setMsg(err.response?.data?.message ?? t('settings.users.deleteError'))
     }
   }
 
   return (
     <div>
       {msg && <div style={s.toast}>{msg} <button style={s.toastClose} onClick={() => setMsg('')}>✕</button></div>}
-      {loading ? <p style={s.hint}>Carregando...</p> : (
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button style={s.primaryBtn} onClick={() => setShowCreate(v => !v)}>
+          {showCreate ? t('common.cancel') : `+ ${t('settings.users.createBtn')}`}
+        </button>
+      </div>
+      {showCreate && (
+        <div style={s.createForm}>
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#94a3b8' }}>{t('settings.users.createTitle')}</h3>
+          <div style={s.formRow}>
+            <label style={s.formLabel}>{t('settings.users.username')}</label>
+            <input style={s.formInput} value={createForm.userName} onChange={e => setCreateForm(f => ({ ...f, userName: e.target.value }))} />
+          </div>
+          <div style={s.formRow}>
+            <label style={s.formLabel}>{t('login.email')}</label>
+            <input style={s.formInput} type="email" value={createForm.email} onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))} />
+          </div>
+          <div style={s.formRow}>
+            <label style={s.formLabel}>{t('login.password')}</label>
+            <input style={s.formInput} type="password" value={createForm.password} onChange={e => setCreateForm(f => ({ ...f, password: e.target.value }))} />
+          </div>
+          <div style={s.formRow}>
+            <label style={s.formLabel}>Role</label>
+            <select style={s.select} value={createForm.role} onChange={e => setCreateForm(f => ({ ...f, role: e.target.value }))}>
+              {['Admin', 'Manager', 'Contributor', 'Reader'].map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <button style={s.primaryBtn} disabled={creating} onClick={createUser}>
+            {creating ? t('common.saving') : t('settings.users.createBtn')}
+          </button>
+        </div>
+      )}
+      {loading ? <p style={s.hint}>{t('common.loading')}</p> : (
         <table style={s.table}>
           <thead>
             <tr>
-              {['Usuário', 'Email', 'Role', 'Criado em', 'Ações'].map(h => <th key={h} style={s.th}>{h}</th>)}
+              {[t('settings.users.username'), 'Email', 'Role', t('settings.users.createdAt'), t('common.actions')].map(h => <th key={h} style={s.th}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -135,7 +200,7 @@ function UsersTab() {
                 </td>
                 <td style={s.td}>{new Date(u.createdAt).toLocaleDateString('pt-BR')}</td>
                 <td style={s.td}>
-                  <button style={s.dangerBtn} onClick={() => deleteUser(u.id, u.userName)}>Excluir</button>
+                  <button style={s.dangerBtn} onClick={() => deleteUser(u.id, u.userName)}>{t('common.delete')}</button>
                 </td>
               </tr>
             ))}
@@ -151,6 +216,7 @@ function UsersTab() {
 function ProjectsTab() {
   const [projects, setProjects] = useState<ProjectSummaryAdmin[]>([])
   const [loading, setLoading] = useState(true)
+  const t = useT()
 
   useEffect(() => {
     api.get<ProjectSummaryAdmin[]>('/admin/projects').then(r => { setProjects(r.data); setLoading(false) }).catch(() => setLoading(false))
@@ -172,11 +238,11 @@ function ProjectsTab() {
 
   return (
     <div>
-      {loading ? <p style={s.hint}>Carregando...</p> : (
+      {loading ? <p style={s.hint}>{t('common.loading')}</p> : (
         <table style={s.table}>
           <thead>
             <tr>
-              {['Nome', 'Dono', 'Criado em', 'Arquivado', 'Tag Paperless'].map(h => <th key={h} style={s.th}>{h}</th>)}
+              {[t('settings.projects.name'), t('settings.projects.owner'), t('settings.users.createdAt'), t('settings.projects.archived'), t('settings.projects.paperlessTag')].map(h => <th key={h} style={s.th}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -244,6 +310,7 @@ function ThemeTab() {
   const [importPreview, setImportPreview] = useState<ThemeDefinition | null>(null)
   const [importError, setImportError] = useState('')
   const [msg, setMsg] = useState('')
+  const t = useT()
 
   const handlePreview = () => {
     const result = importVscodeTheme(vscodeJson)
@@ -259,7 +326,7 @@ function ThemeTab() {
   const handleApplyImport = () => {
     if (!importPreview) return
     applyTheme(importPreview)
-    setMsg('Tema importado aplicado!')
+    setMsg(t('settings.theme.importApplied'))
     setShowImport(false)
     setImportPreview(null)
     setVscodeJson('')
@@ -268,14 +335,14 @@ function ThemeTab() {
   return (
     <div>
       {msg && <div style={s.toast}>{msg} <button style={s.toastClose} onClick={() => setMsg('')}>✕</button></div>}
-      <h3 style={s.sectionTitle}>Temas Built-in</h3>
+      <h3 style={s.sectionTitle}>{t('settings.theme.builtIn')}</h3>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 24 }}>
         {BUILTIN_THEMES.map(theme => {
           const isActive = currentTheme?.name === theme.name
           return (
             <button
               key={theme.name}
-              onClick={() => { applyBuiltin(theme.name); setMsg(`Tema "${theme.displayName}" aplicado!`) }}
+              onClick={() => { applyBuiltin(theme.name); setMsg(t('settings.theme.applied', { name: theme.displayName })) }}
               style={{
                 ...s.themeCard,
                 border: isActive ? `2px solid ${theme.colors['--accent']}` : '2px solid transparent',
@@ -296,12 +363,12 @@ function ThemeTab() {
       </div>
 
       <button style={s.btn} onClick={() => setShowImport(v => !v)}>
-        📂 Importar tema VS Code
+        📂 {t('settings.theme.importVscode')}
       </button>
 
       {showImport && (
         <div style={{ marginTop: 16 }}>
-          <p style={s.hint}>Cole o conteúdo do arquivo JSON do tema VS Code abaixo:</p>
+          <p style={s.hint}>{t('settings.theme.importHint')}</p>
           <textarea
             style={s.textarea}
             rows={10}
@@ -310,13 +377,13 @@ function ThemeTab() {
             placeholder='{ "name": "My Theme", "colors": { "editor.background": "#1e1e1e", ... } }'
           />
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <button style={s.btn} onClick={handlePreview}>👁️ Pré-visualizar</button>
-            {importPreview && <button style={s.accentBtn} onClick={handleApplyImport}>✅ Aplicar</button>}
+            <button style={s.btn} onClick={handlePreview}>👁️ {t('settings.theme.preview')}</button>
+            {importPreview && <button style={s.accentBtn} onClick={handleApplyImport}>✅ {t('settings.theme.apply')}</button>}
           </div>
           {importError && <p style={{ color: 'var(--danger)', marginTop: 8 }}>{importError}</p>}
           {importPreview && (
             <div style={{ marginTop: 12 }}>
-              <p style={s.hint}>Pré-visualização de "{importPreview.displayName}":</p>
+              <p style={s.hint}>{t('settings.theme.previewOf', { name: importPreview.displayName })}</p>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {Object.entries(importPreview.colors).map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -345,6 +412,7 @@ function LlmTab() {
   const [fallbackStatus, setFallbackStatus] = useState<'idle' | 'ok' | 'error'>('idle')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const t = useT()
 
   useEffect(() => {
     api.get<Record<string, string>>('/admin/settings').then(r => {
@@ -379,9 +447,9 @@ function LlmTab() {
           'llm.fallback.model': fallbackModel,
         },
       })
-      setMsg('Configurações salvas!')
+      setMsg(t('common.saved'))
     } catch {
-      setMsg('Erro ao salvar.')
+      setMsg(t('common.saveError'))
     } finally {
       setSaving(false)
     }
@@ -390,38 +458,38 @@ function LlmTab() {
   return (
     <div style={{ maxWidth: 520 }}>
       {msg && <div style={s.toast}>{msg} <button style={s.toastClose} onClick={() => setMsg('')}>✕</button></div>}
-      <h3 style={s.sectionTitle}>Servidor Principal</h3>
+      <h3 style={s.sectionTitle}>{t('settings.llm.primaryServer')}</h3>
       <label style={s.label}>URL</label>
       <input style={s.input} value={primaryUrl} onChange={e => setPrimaryUrl(e.target.value)} placeholder="http://localhost:11434" />
-      <label style={s.label}>Modelo</label>
+      <label style={s.label}>{t('settings.llm.model')}</label>
       <input style={s.input} value={primaryModel} onChange={e => setPrimaryModel(e.target.value)} placeholder="llama3" />
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <button style={s.btn} onClick={() => testConnection(primaryUrl, setPrimaryStatus)}>🔌 Testar conexão</button>
-        {primaryStatus === 'ok' && <span style={{ color: 'var(--success)' }}>✅ Conectado</span>}
-        {primaryStatus === 'error' && <span style={{ color: 'var(--danger)' }}>❌ Erro</span>}
+        <button style={s.btn} onClick={() => testConnection(primaryUrl, setPrimaryStatus)}>🔌 {t('settings.llm.testConn')}</button>
+        {primaryStatus === 'ok' && <span style={{ color: 'var(--success)' }}>✅ {t('settings.llm.connected')}</span>}
+        {primaryStatus === 'error' && <span style={{ color: 'var(--danger)' }}>❌ {t('common.error')}</span>}
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0 8px' }}>
-        <label style={{ ...s.label, margin: 0 }}>Habilitar fallback</label>
+        <label style={{ ...s.label, margin: 0 }}>{t('settings.llm.enableFallback')}</label>
         <input type="checkbox" checked={fallbackEnabled} onChange={e => setFallbackEnabled(e.target.checked)} style={{ width: 18, height: 18 }} />
       </div>
 
       {fallbackEnabled && (
         <div>
-          <h3 style={s.sectionTitle}>Servidor Fallback</h3>
+          <h3 style={s.sectionTitle}>{t('settings.llm.fallbackServer')}</h3>
           <label style={s.label}>URL</label>
           <input style={s.input} value={fallbackUrl} onChange={e => setFallbackUrl(e.target.value)} placeholder="http://localhost:11435" />
-          <label style={s.label}>Modelo</label>
+          <label style={s.label}>{t('settings.llm.model')}</label>
           <input style={s.input} value={fallbackModel} onChange={e => setFallbackModel(e.target.value)} placeholder="llama3" />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <button style={s.btn} onClick={() => testConnection(fallbackUrl, setFallbackStatus)}>🔌 Testar conexão</button>
-            {fallbackStatus === 'ok' && <span style={{ color: 'var(--success)' }}>✅ Conectado</span>}
-            {fallbackStatus === 'error' && <span style={{ color: 'var(--danger)' }}>❌ Erro</span>}
+            <button style={s.btn} onClick={() => testConnection(fallbackUrl, setFallbackStatus)}>🔌 {t('settings.llm.testConn')}</button>
+            {fallbackStatus === 'ok' && <span style={{ color: 'var(--success)' }}>✅ {t('settings.llm.connected')}</span>}
+            {fallbackStatus === 'error' && <span style={{ color: 'var(--danger)' }}>❌ {t('common.error')}</span>}
           </div>
         </div>
       )}
 
-      <button style={s.accentBtn} onClick={save} disabled={saving}>{saving ? 'Salvando...' : '💾 Salvar'}</button>
+      <button style={s.accentBtn} onClick={save} disabled={saving}>{saving ? t('common.saving') : `💾 ${t('common.save')}`}</button>
     </div>
   )
 }
@@ -438,6 +506,7 @@ function PaperlessTab() {
   const [msg, setMsg] = useState('')
   const [tags, setTags] = useState<{ id: number; name: string }[]>([])
   const [loadingTags, setLoadingTags] = useState(false)
+  const t = useT()
 
   useEffect(() => {
     api.get<Record<string, string>>('/admin/settings').then(r => {
@@ -451,7 +520,6 @@ function PaperlessTab() {
   const testConnection = async () => {
     setStatus('idle')
     try {
-      // Usa o backend como proxy para evitar bloqueio CORS do browser
       const r = await api.post<{ ok: boolean; statusCode?: number; error?: string }>(
         '/paperless/test',
         { url, token }
@@ -468,7 +536,7 @@ function PaperlessTab() {
       const r = await api.get<{ results: { id: number; name: string }[] }>('/paperless/tags')
       setTags(r.data.results ?? [])
     } catch {
-      setMsg('Erro ao carregar tags do Paperless.')
+      setMsg(t('settings.paperless.loadTagsError'))
     } finally {
       setLoadingTags(false)
     }
@@ -484,9 +552,9 @@ function PaperlessTab() {
           'paperless.globalTagId': globalTagId,
         },
       })
-      setMsg('Configurações salvas!')
+      setMsg(t('common.saved'))
     } catch {
-      setMsg('Erro ao salvar.')
+      setMsg(t('common.saveError'))
     } finally {
       setSaving(false)
     }
@@ -496,34 +564,31 @@ function PaperlessTab() {
     <div style={{ maxWidth: 560 }}>
       {msg && <div style={s.toast}>{msg} <button style={s.toastClose} onClick={() => setMsg('')}>✕</button></div>}
 
-      <h3 style={s.sectionTitle}>Conexão com Paperless-ng</h3>
-      <label style={s.label}>URL do servidor</label>
+      <h3 style={s.sectionTitle}>{t('settings.paperless.connTitle')}</h3>
+      <label style={s.label}>{t('settings.paperless.serverUrl')}</label>
       <input style={s.input} value={url} onChange={e => setUrl(e.target.value)} placeholder="http://localhost:8000" />
-      <label style={s.label}>Token de autenticação</label>
+      <label style={s.label}>{t('settings.paperless.token')}</label>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <input
           style={{ ...s.input, flex: 1, marginBottom: 0 }}
           type={showToken ? 'text' : 'password'}
           value={token}
           onChange={e => setToken(e.target.value)}
-          placeholder="Token de API"
+          placeholder={t('settings.paperless.tokenPh')}
         />
         <button style={s.btn} onClick={() => setShowToken(v => !v)}>{showToken ? '🙈' : '👁️'}</button>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-        <button style={s.btn} onClick={testConnection}>🔌 Testar conexão</button>
-        {status === 'ok' && <span style={{ color: 'var(--success)' }}>✅ Conectado</span>}
-        {status === 'error' && <span style={{ color: 'var(--danger)' }}>❌ Erro</span>}
+        <button style={s.btn} onClick={testConnection}>🔌 {t('settings.llm.testConn')}</button>
+        {status === 'ok' && <span style={{ color: 'var(--success)' }}>✅ {t('settings.llm.connected')}</span>}
+        {status === 'error' && <span style={{ color: 'var(--danger)' }}>❌ {t('common.error')}</span>}
       </div>
 
-      <h3 style={s.sectionTitle}>Tag Global</h3>
-      <p style={s.hint}>
-        Esta tag é usada como base em todas as consultas. Projetos sem tag própria consultam apenas esta tag.
-        Informe o <strong>ID numérico</strong> da tag no Paperless-ng.
-      </p>
+      <h3 style={s.sectionTitle}>{t('settings.paperless.globalTag')}</h3>
+      <p style={s.hint}>{t('settings.paperless.globalTagHint')}</p>
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 16 }}>
         <div style={{ flex: 1 }}>
-          <label style={s.label}>ID da Tag Global</label>
+          <label style={s.label}>{t('settings.paperless.globalTagId')}</label>
           <input
             style={{ ...s.input, marginBottom: 0 }}
             type="number"
@@ -534,45 +599,152 @@ function PaperlessTab() {
         </div>
         {url && token && (
           <button style={s.btn} onClick={loadTags} disabled={loadingTags}>
-            {loadingTags ? '⏳' : '🏷️ Carregar tags'}
+            {loadingTags ? '⏳' : `🏷️ ${t('settings.paperless.loadTags')}`}
           </button>
         )}
       </div>
 
       {tags.length > 0 && (
         <div style={{ marginBottom: 16, padding: '10px 12px', background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border)' }}>
-          <p style={{ ...s.hint, marginBottom: 8 }}>Clique em uma tag para usar como global:</p>
+          <p style={{ ...s.hint, marginBottom: 8 }}>{t('settings.paperless.clickTag')}</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {tags.map(t => (
+            {tags.map(tg => (
               <button
-                key={t.id}
+                key={tg.id}
                 style={{
-                  background: globalTagId === String(t.id) ? 'var(--accent)' : 'var(--bg-card)',
-                  color: globalTagId === String(t.id) ? '#fff' : 'var(--text-secondary)',
+                  background: globalTagId === String(tg.id) ? 'var(--accent)' : 'var(--bg-card)',
+                  color: globalTagId === String(tg.id) ? '#fff' : 'var(--text-secondary)',
                   border: '1px solid var(--border)',
                   borderRadius: 20, padding: '3px 10px', cursor: 'pointer', fontSize: 12,
                 }}
-                onClick={() => setGlobalTagId(String(t.id))}
+                onClick={() => setGlobalTagId(String(tg.id))}
               >
-                #{t.id} {t.name}
+                #{tg.id} {tg.name}
               </button>
             ))}
           </div>
         </div>
       )}
 
-      <button style={s.accentBtn} onClick={save} disabled={saving}>{saving ? 'Salvando...' : '💾 Salvar'}</button>
+      <button style={s.accentBtn} onClick={save} disabled={saving}>{saving ? t('common.saving') : `💾 ${t('common.save')}`}</button>
+    </div>
+  )
+}
 
-      <div style={{ marginTop: 28, padding: '12px 14px', background: 'var(--bg-elevated)', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-muted)' }}>
-        <strong style={{ color: 'var(--text-secondary)' }}>📌 Tags por Projeto</strong>
-        <p style={{ marginTop: 6, lineHeight: 1.6 }}>
-          Para associar uma tag específica a um projeto, acesse a aba <strong>🗂️ Projetos</strong> e edite a coluna <em>Tag Paperless</em>.
-        </p>
-        <p style={{ marginTop: 4, lineHeight: 1.6 }}>
-          <strong>Lógica de consulta:</strong><br />
-          • Projeto <em>sem</em> tag → consulta apenas Tag Global<br />
-          • Projeto <em>com</em> tag → (1) Tag Projeto + Tag Global → (2) Só Tag Projeto → (3) Só Tag Global
-        </p>
+// ── Auth Tab ──────────────────────────────────────────────────────────────────
+
+function AuthTab() {
+  const [enabled, setEnabled] = useState(false)
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
+  const [authUrl, setAuthUrl] = useState('')
+  const [tokenUrl, setTokenUrl] = useState('')
+  const [userInfoUrl, setUserInfoUrl] = useState('')
+  const [scope, setScope] = useState('openid profile email')
+  const [callbackUrl, setCallbackUrl] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+  const t = useT()
+
+  useEffect(() => {
+    api.get<Record<string, string>>('/admin/settings').then(r => {
+      const d = r.data
+      if (d['auth.oidc.enabled']) setEnabled(d['auth.oidc.enabled'] === 'true')
+      if (d['auth.oidc.clientId']) setClientId(d['auth.oidc.clientId'])
+      if (d['auth.oidc.clientSecret']) setClientSecret(d['auth.oidc.clientSecret'])
+      if (d['auth.oidc.authorizationUrl']) setAuthUrl(d['auth.oidc.authorizationUrl'])
+      if (d['auth.oidc.tokenUrl']) setTokenUrl(d['auth.oidc.tokenUrl'])
+      if (d['auth.oidc.userInfoUrl']) setUserInfoUrl(d['auth.oidc.userInfoUrl'])
+      if (d['auth.oidc.scope']) setScope(d['auth.oidc.scope'])
+      if (d['auth.oidc.callbackUrl']) setCallbackUrl(d['auth.oidc.callbackUrl'])
+    }).catch(() => {})
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.put('/admin/settings', {
+        settings: {
+          'auth.oidc.enabled': String(enabled),
+          'auth.oidc.clientId': clientId,
+          'auth.oidc.clientSecret': clientSecret,
+          'auth.oidc.authorizationUrl': authUrl,
+          'auth.oidc.tokenUrl': tokenUrl,
+          'auth.oidc.userInfoUrl': userInfoUrl,
+          'auth.oidc.scope': scope,
+          'auth.oidc.callbackUrl': callbackUrl,
+        },
+      })
+      setMsg(t('common.saved'))
+    } catch {
+      setMsg(t('common.saveError'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 520 }}>
+      {msg && <div style={s.toast}>{msg} <button style={s.toastClose} onClick={() => setMsg('')}>✕</button></div>}
+      <h3 style={s.sectionTitle}>{t('settings.auth.oidcTitle')}</h3>
+      <p style={s.hint}>{t('settings.auth.oidcHint')}</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+        <label style={{ ...s.label, margin: 0 }}>{t('settings.auth.enableOidc')}</label>
+        <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} style={{ width: 18, height: 18 }} />
+      </div>
+      {enabled && (
+        <>
+          <label style={s.label}>Client ID</label>
+          <input style={s.input} value={clientId} onChange={e => setClientId(e.target.value)} placeholder="your-client-id" />
+          <label style={s.label}>Client Secret</label>
+          <input style={s.input} type="password" value={clientSecret} onChange={e => setClientSecret(e.target.value)} placeholder="••••••••" />
+          <label style={s.label}>{t('settings.auth.authUrl')}</label>
+          <input style={s.input} value={authUrl} onChange={e => setAuthUrl(e.target.value)} placeholder="https://idp.example.com/oauth2/authorize" />
+          <label style={s.label}>{t('settings.auth.tokenUrl')}</label>
+          <input style={s.input} value={tokenUrl} onChange={e => setTokenUrl(e.target.value)} placeholder="https://idp.example.com/oauth2/token" />
+          <label style={s.label}>{t('settings.auth.userInfoUrl')}</label>
+          <input style={s.input} value={userInfoUrl} onChange={e => setUserInfoUrl(e.target.value)} placeholder="https://idp.example.com/oauth2/userinfo" />
+          <label style={s.label}>Scope</label>
+          <input style={s.input} value={scope} onChange={e => setScope(e.target.value)} placeholder="openid profile email" />
+          <label style={s.label}>{t('settings.auth.callbackUrl')}</label>
+          <input style={s.input} value={callbackUrl} onChange={e => setCallbackUrl(e.target.value)} placeholder="http://localhost:3000/auth/callback" />
+        </>
+      )}
+      <button style={s.accentBtn} onClick={save} disabled={saving}>{saving ? t('common.saving') : `💾 ${t('common.save')}`}</button>
+    </div>
+  )
+}
+
+// ── Language Tab ──────────────────────────────────────────────────────────────
+
+function LanguageTab() {
+  const { lang, setLang } = useI18n()
+  const t = useT()
+
+  return (
+    <div style={{ maxWidth: 400 }}>
+      <h3 style={s.sectionTitle}>{t('settings.language.title')}</h3>
+      <p style={s.hint}>{t('settings.language.hint')}</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+        {LANGS.map(l => (
+          <button
+            key={l.code}
+            onClick={() => setLang(l.code)}
+            style={{
+              ...s.btn,
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 16px', fontSize: 14,
+              background: lang === l.code ? 'var(--bg-elevated)' : 'none',
+              border: lang === l.code ? '1px solid var(--accent)' : '1px solid var(--border)',
+              color: lang === l.code ? 'var(--accent)' : 'var(--text-secondary)',
+              fontWeight: lang === l.code ? 700 : 400,
+            }}
+          >
+            <span style={{ fontSize: 22 }}>{l.flag}</span>
+            <span>{l.label}</span>
+            {lang === l.code && <span style={{ marginLeft: 'auto' }}>✓</span>}
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -656,5 +828,21 @@ const s: Record<string, React.CSSProperties> = {
   },
   toastClose: {
     background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14,
+  },
+
+  primaryBtn: {
+    background: 'var(--accent)', border: 'none', color: '#fff',
+    borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+  },
+  createForm: {
+    background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+    borderRadius: 10, padding: '16px 20px', marginBottom: 20,
+  },
+  formRow: { marginBottom: 10 },
+  formLabel: { display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 },
+  formInput: {
+    display: 'block', width: '100%', boxSizing: 'border-box',
+    background: 'var(--bg-primary)', border: '1px solid var(--border)',
+    color: 'var(--text-primary)', borderRadius: 6, padding: '7px 10px', fontSize: 13,
   },
 }

@@ -39,6 +39,19 @@ public static class AuthEndpoints
         };
 
         db.Users.Add(user);
+
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = user.Id,
+            Name = $"Particular.{request.UserName}",
+            Description = string.Empty,
+            IsArchived = false,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.Projects.Add(project);
+
         await db.SaveChangesAsync();
 
         var expiresIn = int.Parse(config["Jwt:AccessTokenExpirationMinutes"] ?? "60") * 60;

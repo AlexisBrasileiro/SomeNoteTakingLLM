@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
 import { useAuth } from '../context/AuthContext'
+import { useT } from '../context/I18nContext'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -10,6 +11,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
+  const t = useT()
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -25,7 +27,7 @@ export default function LoginPage() {
       })
       navigate('/')
     } catch {
-      setError('Email ou senha inválidos.')
+      setError(t('login.error'))
     } finally {
       setLoading(false)
     }
@@ -34,29 +36,29 @@ export default function LoginPage() {
   return (
     <div style={styles.container}>
       <div style={styles.card}>
-        <h1 style={styles.title}>📓 SomeNoteTaking</h1>
+        <h1 style={styles.title}>📓 {t('login.title')}</h1>
         <form onSubmit={handleSubmit} style={styles.form}>
-          <label style={styles.label}>Email</label>
+          <label style={styles.label}>{t('login.email')}</label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
             style={styles.input}
-            placeholder="voce@exemplo.com"
+            placeholder={t('login.emailPh')}
           />
-          <label style={styles.label}>Senha</label>
+          <label style={styles.label}>{t('login.password')}</label>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
             style={styles.input}
-            placeholder="••••••••"
+            placeholder={t('login.passwordPh')}
           />
           {error && <p style={styles.error}>{error}</p>}
           <button type="submit" disabled={loading} style={styles.button}>
-            {loading ? 'Entrando...' : 'Entrar'}
+            {loading ? t('login.loading') : t('login.submit')}
           </button>
         </form>
       </div>

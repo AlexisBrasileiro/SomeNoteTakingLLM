@@ -12,6 +12,7 @@ public static class AdminEndpoints
         var group = app.MapGroup("/api/v1/admin").WithTags("Admin").RequireAuthorization();
 
         group.MapGet("/users", GetUsers);
+        group.MapPost("/users", CreateUser);
         group.MapPut("/users/{id:guid}/role", UpdateUserRole);
         group.MapDelete("/users/{id:guid}", DeleteUser);
         group.MapGet("/projects", GetProjects);
@@ -34,6 +35,51 @@ public static class AdminEndpoints
             .ToListAsync();
 
         return Results.Ok(users);
+    }
+
+    private static async Task<IResult> CreateUser(
+        CreateUserRequest request,
+        ClaimsPrincipal user,
+        SomeNoteTakingLlmDbContext db)
+    {
+        var role = user.FindFirstValue(ClaimTypes.Role);
+        if (role != "Admin") return Results.Forbid();
+
+        if (await db.Users.AnyAsync(u => u.Email == request.Email))
+            return Results.Conflict(new { message = "Email já cadastrado." });
+
+        if (!Enum.TryParse<UserRole>(request.Role, ignoreCase: true, out var userRole))
+            userRole = UserRole.Reader;
+
+        var now = DateTime.UtcNow;
+        var newUser = new User
+        {
+            Id = Guid.NewGuid(),
+            UserName = request.UserName,
+            Email = request.Email,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+            Role = userRole,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.Users.Add(newUser);
+
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = newUser.Id,
+            Name = $"Particular.{request.UserName}",
+            Description = string.Empty,
+            IsArchived = false,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        db.Projects.Add(project);
+
+        await db.SaveChangesAsync();
+
+        return Results.Created($"/api/v1/admin/users/{newUser.Id}",
+            new UserSummary(newUser.Id, newUser.UserName, newUser.Email, newUser.Role.ToString(), newUser.CreatedAt));
     }
 
     private static async Task<IResult> UpdateUserRole(

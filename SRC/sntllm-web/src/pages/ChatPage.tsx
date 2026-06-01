@@ -4,6 +4,9 @@ import MarkdownPreview from '@uiw/react-markdown-preview'
 import api from '../api/client'
 import AppLayout from '../components/AppLayout'
 import type { ChatMessage, ChatReference, Note, Project } from '../types/index'
+import { useT } from '../context/I18nContext'
+import { useSidebarRefresh } from '../context/SidebarRefreshContext'
+import { THINKING_COUNT } from '../i18n'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -21,40 +24,24 @@ interface DocumentQueryResult { strategy: string; strategyLabel: string; documen
 
 type SendStatus = 'idle' | 'preparing' | 'thinking' | 'streaming' | 'error'
 
-const THINKING_MSGS = [
-  '🪔 Consultando o gênio da LLaMpada...',
-  '⚡ Calibrando o capacitor de fluxo...',
-  '🔵 Contando as quinas de um círculo...',
-  '🐙 Perguntando aos polvos quantificadores...',
-  '🧠 Reorganizando os neurônios artificiais...',
-  '💾 Traduzindo para binário e de volta...',
-  '🔍 Procurando agulha no palheiro digital...',
-  '🔥 Aquecendo os transistores...',
-  '🔮 Consultando o oráculo de silício...',
-  '🧬 Destrinchando os embeddings...',
-  '🌀 Dobrando o espaço de tokens...',
-  '🎲 Rolando o dado de probabilidade...',
-  '📡 Sintonizando na frequência do conhecimento...',
-  '🦙 Acordando a lhama adormecida...',
-  '⚗️ Preparando a poção de linguagem natural...',
-]
-
 function ThinkingIndicator({ status }: { status: SendStatus }) {
-  const [msgIdx, setMsgIdx] = useState(0)
+  const t = useT()
+  const [msgIdx, setMsgIdx] = useState(() => Math.floor(Math.random() * THINKING_COUNT))
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
     if (status === 'idle' || status === 'error' || status === 'streaming') return
     setElapsed(0)
-    setMsgIdx(0)
+    // Pick a random message to start, then rotate randomly every 15s
+    setMsgIdx(Math.floor(Math.random() * THINKING_COUNT))
     const ticker = setInterval(() => setElapsed(s => s + 1), 1000)
-    const rotator = setInterval(() => setMsgIdx(i => (i + 1) % THINKING_MSGS.length), 15_000)
+    const rotator = setInterval(() => setMsgIdx(Math.floor(Math.random() * THINKING_COUNT)), 15_000)
     return () => { clearInterval(ticker); clearInterval(rotator) }
   }, [status])
 
   if (status === 'idle' || status === 'error' || status === 'streaming') return null
 
-  const label = status === 'preparing' ? '⏳ Preparando contexto...' : THINKING_MSGS[msgIdx]
+  const label = status === 'preparing' ? t('chat.status.preparing') : t(`thinking.${msgIdx}`)
   const mins = Math.floor(elapsed / 60)
   const secs = elapsed % 60
   const timer = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
@@ -107,6 +94,7 @@ function RefModal({ onClose, onAdd, alreadyAdded }: {
   onAdd: (ref: ChatReference) => void
   alreadyAdded: ChatReference[]
 }) {
+  const t = useT()
   const [tab, setTab] = useState<'notes' | 'tags' | 'docs'>('notes')
   const [notes, setNotes] = useState<Note[]>([])
   const [tags, setTags] = useState<PaperlessTag[]>([])
@@ -143,21 +131,21 @@ function RefModal({ onClose, onAdd, alreadyAdded }: {
     <div style={M.overlay} onClick={onClose}>
       <div style={M.modal} onClick={e => e.stopPropagation()}>
         <div style={M.header}>
-          <span style={M.title}>Adicionar referencia</span>
+          <span style={M.title}>{t('chat.modal.title')}</span>
           <button style={M.closeBtn} onClick={onClose}>X</button>
         </div>
         <div style={M.tabs}>
-          {(['notes', 'tags', 'docs'] as const).map(t => (
-            <button key={t} style={{ ...M.tabBtn, ...(tab === t ? M.tabActive : {}) }}
-              onClick={() => setTab(t)}>
-              {t === 'notes' ? 'Notas' : t === 'tags' ? 'Tags' : 'Documentos'}
+          {(['notes', 'tags', 'docs'] as const).map(tb => (
+            <button key={tb} style={{ ...M.tabBtn, ...(tab === tb ? M.tabActive : {}) }}
+              onClick={() => setTab(tb)}>
+              {tb === 'notes' ? t('chat.modal.notes') : tb === 'tags' ? t('chat.modal.tags') : t('chat.modal.docs')}
             </button>
           ))}
         </div>
-        <input style={M.search} placeholder="Buscar..." value={search}
+        <input style={M.search} placeholder={t('common.search')} value={search}
           onChange={e => setSearch(e.target.value)} autoFocus />
         <div style={M.list}>
-          {loading && <div style={M.hint}>Carregando...</div>}
+          {loading && <div style={M.hint}>{t('common.loading')}</div>}
           {!loading && tab === 'notes' && filteredNotes.map(n => {
             const added = isAdded('note', n.id)
             return (
@@ -168,12 +156,12 @@ function RefModal({ onClose, onAdd, alreadyAdded }: {
               </button>
             )
           })}
-          {!loading && tab === 'tags' && filteredTags.map(t => {
-            const added = isAdded('paperless_tag', String(t.id))
+          {!loading && tab === 'tags' && filteredTags.map(tg => {
+            const added = isAdded('paperless_tag', String(tg.id))
             return (
-              <button key={t.id} style={{ ...M.item, ...(added ? M.itemAdded : {}) }}
-                onClick={() => !added && onAdd({ type: 'paperless_tag', id: String(t.id), title: t.name })}>
-                {t.name}
+              <button key={tg.id} style={{ ...M.item, ...(added ? M.itemAdded : {}) }}
+                onClick={() => !added && onAdd({ type: 'paperless_tag', id: String(tg.id), title: tg.name })}>
+                {tg.name}
                 {added && <span style={M.checkmark}>v</span>}
               </button>
             )
@@ -188,9 +176,9 @@ function RefModal({ onClose, onAdd, alreadyAdded }: {
               </button>
             )
           })}
-          {!loading && tab === 'notes' && filteredNotes.length === 0 && <div style={M.hint}>Nenhuma nota.</div>}
-          {!loading && tab === 'tags'  && filteredTags.length === 0  && <div style={M.hint}>Nenhuma tag.</div>}
-          {!loading && tab === 'docs'  && filteredDocs.length === 0  && <div style={M.hint}>Nenhum documento.</div>}
+          {!loading && tab === 'notes' && filteredNotes.length === 0 && <div style={M.hint}>{t('chat.modal.noNotes')}</div>}
+          {!loading && tab === 'tags'  && filteredTags.length === 0  && <div style={M.hint}>{t('chat.modal.noTags')}</div>}
+          {!loading && tab === 'docs'  && filteredDocs.length === 0  && <div style={M.hint}>{t('chat.modal.noDocs')}</div>}
         </div>
       </div>
     </div>
@@ -204,6 +192,7 @@ function RefsPanel({ messages, open, onToggle }: {
   open: boolean
   onToggle: () => void
 }) {
+  const t = useT()
   const allRefs = useMemo(() => {
     const countMap = new Map<string, number>()
     const seen = new Map<string, ChatReference>()
@@ -230,13 +219,13 @@ function RefsPanel({ messages, open, onToggle }: {
       {open && (
         <div style={RP.content}>
           <div style={RP.panelHeader}>
-            <span style={RP.panelTitle}>Referencias</span>
+            <span style={RP.panelTitle}>{t('chat.refs.panel.title')}</span>
             <span style={RP.panelCount}>{allRefs.length}</span>
           </div>
-          {allRefs.length === 0 && <p style={RP.empty}>Nenhuma referencia usada.</p>}
+          {allRefs.length === 0 && <p style={RP.empty}>{t('chat.refs.panel.empty')}</p>}
           {notes.length > 0 && (
             <div style={RP.group}>
-              <div style={RP.groupLabel}>Notas</div>
+              <div style={RP.groupLabel}>{t('chat.refs.panel.notes')}</div>
               {notes.map(r => (
                 <div key={r.id} style={RP.item}>
                   <span style={RP.itemTitle}>{r.title}</span>
@@ -247,7 +236,7 @@ function RefsPanel({ messages, open, onToggle }: {
           )}
           {tags.length > 0 && (
             <div style={RP.group}>
-              <div style={RP.groupLabel}>Tags Paperless</div>
+              <div style={RP.groupLabel}>{t('chat.refs.panel.tags')}</div>
               {tags.map(r => (
                 <div key={r.id} style={RP.item}>
                   <span style={RP.itemTitle}>{r.title}</span>
@@ -258,7 +247,7 @@ function RefsPanel({ messages, open, onToggle }: {
           )}
           {docRefs.length > 0 && (
             <div style={RP.group}>
-              <div style={RP.groupLabel}>Documentos</div>
+              <div style={RP.groupLabel}>{t('chat.refs.panel.docs')}</div>
               {docRefs.map(r => (
                 <div key={r.id} style={RP.item}>
                   <span style={RP.itemTitle}>{r.title}</span>
@@ -279,6 +268,8 @@ export default function ChatPage() {
   const { id } = useParams<{ id: string }>()
   const isNew = !id || id === 'new'
   const navigate = useNavigate()
+  const t = useT()
+  const { refresh: refreshSidebar } = useSidebarRefresh()
 
   const [projects, setProjects]         = useState<Project[]>([])
   const [chat, setChat]                 = useState<ChatDetail | null>(null)
@@ -445,6 +436,7 @@ export default function ChatPage() {
       }
 
       setSendStatus('idle')
+      refreshSidebar()
     } catch (e: unknown) {
       console.error('[ChatPage] send error:', e)
       const msg = (e instanceof Error ? e.message : null) ?? 'Erro ao enviar mensagem.'
@@ -474,19 +466,19 @@ export default function ChatPage() {
       <AppLayout>
         <div style={S.newContainer}>
           <div style={S.newCard}>
-            <h2 style={S.newTitle}>Novo Chat</h2>
-            <label style={S.label}>Titulo</label>
+            <h2 style={S.newTitle}>{t('chat.new.title')}</h2>
+            <label style={S.label}>{t('chat.new.titleLabel')}</label>
             <input
               style={S.textInput}
-              placeholder="Nome do chat"
+              placeholder={t('chat.new.titlePh')}
               value={newTitle}
               onChange={e => setNewTitle(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleCreate()}
               autoFocus
             />
-            <label style={S.label}>Projeto (opcional)</label>
+            <label style={S.label}>{t('chat.new.projectLabel')}</label>
             <select style={S.selectInput} value={newProjectId} onChange={e => setNewProjectId(e.target.value)}>
-              <option value="">Nenhum</option>
+              <option value="">{t('chat.new.projectNone')}</option>
               {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             {createErr && <p style={S.errText}>{createErr}</p>}
@@ -495,7 +487,7 @@ export default function ChatPage() {
               onClick={handleCreate}
               disabled={creating || !newTitle.trim()}
             >
-              {creating ? 'Criando...' : 'Criar Chat'}
+              {creating ? t('chat.new.creating') : t('chat.new.create')}
             </button>
           </div>
         </div>
@@ -511,14 +503,14 @@ export default function ChatPage() {
 
         {/* Toolbar */}
         <div style={S.toolbar}>
-          <button style={S.backBtn} onClick={() => navigate(-1)}>Voltar</button>
+          <button style={S.backBtn} onClick={() => navigate(-1)}>{t('chat.toolbar.back')}</button>
           <span style={S.chatTitle}>{chat?.title ?? '...'}</span>
           <select
             style={S.projectSel}
             value={chat?.projectId ?? ''}
             onChange={e => handleProjectChange(e.target.value)}
           >
-            <option value="">Sem projeto</option>
+            <option value="">{t('chat.toolbar.noProject')}</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           <select
@@ -527,18 +519,18 @@ export default function ChatPage() {
             onChange={e => setContextDays(Number(e.target.value))}
             title="Janela de contexto automático (notas do projeto)"
           >
-            <option value={7}>🕐 7 dias</option>
-            <option value={30}>🕐 30 dias</option>
-            <option value={60}>🕐 60 dias</option>
-            <option value={90}>🕐 90 dias</option>
-            <option value={180}>🕐 180 dias</option>
-            <option value={365}>🕐 1 ano</option>
+            <option value={7}>{t('chat.toolbar.ctx7')}</option>
+            <option value={30}>{t('chat.toolbar.ctx30')}</option>
+            <option value={60}>{t('chat.toolbar.ctx60')}</option>
+            <option value={90}>{t('chat.toolbar.ctx90')}</option>
+            <option value={180}>{t('chat.toolbar.ctx180')}</option>
+            <option value={365}>{t('chat.toolbar.ctx365')}</option>
           </select>
           <button
             style={refsPanelOpen ? { ...S.iconBtn, ...S.iconBtnActive } : S.iconBtn}
             onClick={() => setRefsPanelOpen(o => !o)}
           >
-            Refs
+            {t('chat.toolbar.refs')}
             {(chat?.messages ?? []).some(m => (m.references ?? []).length > 0) && (
               <span style={S.badge}>
                 {new Set((chat?.messages ?? []).flatMap(m => m.references ?? []).map(r => r.type + ':' + r.id)).size}
@@ -551,13 +543,13 @@ export default function ChatPage() {
         <ThinkingIndicator status={sendStatus} />
         {sendStatus === 'streaming' && (
           <div style={S.statusBar}>
-            <span style={{ color: '#34d399', fontSize: 12, fontWeight: 600 }}>✍️ Respondendo...</span>
+            <span style={{ color: '#34d399', fontSize: 12, fontWeight: 600 }}>{t('chat.status.streaming')}</span>
           </div>
         )}
         {sendStatus === 'error' && sendError && (
           <div style={S.errBar}>
             <span>{sendError}</span>
-            <button style={S.errDismiss} onClick={() => { setSendStatus('idle'); setSendError(null) }}>Fechar</button>
+            <button style={S.errDismiss} onClick={() => { setSendStatus('idle'); setSendError(null) }}>{t('common.close')}</button>
           </div>
         )}
 
@@ -567,10 +559,10 @@ export default function ChatPage() {
 
             {/* Messages */}
             <div style={S.messageList}>
-              {isLoading && <p style={S.hint}>Carregando...</p>}
+              {isLoading && <p style={S.hint}>{t('chat.messages.loading')}</p>}
               {loadError && <p style={{ ...S.hint, color: '#f87171' }}>{loadError}</p>}
               {!isLoading && !loadError && (chat?.messages.length ?? 0) === 0 && (
-                <p style={S.hint}>Envie uma mensagem para comecar.</p>
+                <p style={S.hint}>{t('chat.messages.empty')}</p>
               )}
 
               {(chat?.messages ?? []).map(msg => (
@@ -580,14 +572,14 @@ export default function ChatPage() {
                   opacity: msg.id.startsWith('temp-') ? 0.7 : 1,
                 }}>
                   <div style={{ ...S.bubble, ...(msg.role === 'user' ? S.userBubble : S.aiBubble) }}>
-                    <div style={S.msgRole}>{msg.role === 'user' ? 'Voce' : 'Assistente'}</div>
+                    <div style={S.msgRole}>{msg.role === 'user' ? t('chat.role.user') : t('chat.role.assistant')}</div>
                     <div data-color-mode="dark">
                       <MarkdownPreview source={msg.content}
                         style={{ background: 'transparent', color: 'inherit', fontSize: 14 }} />
                     </div>
                     {(msg.references ?? []).length > 0 && (
                       <div style={S.msgRefs}>
-                        <span style={S.msgRefsLabel}>Referencias:</span>
+                        <span style={S.msgRefsLabel}>{t('chat.refs.label')}</span>
                         <div style={S.chips}>
                           {(msg.references ?? []).map(r => (
                             <span key={r.type + ':' + r.id} style={S.chipReadonly}>
@@ -604,7 +596,7 @@ export default function ChatPage() {
               {isSending && (chat?.messages ?? []).every(m => !m.id.startsWith('temp-stream-') || m.content === '') && (
                 <div style={{ ...S.msgRow, justifyContent: 'flex-start' }}>
                   <div style={{ ...S.bubble, ...S.aiBubble }}>
-                    <div style={S.msgRole}>Assistente</div>
+                    <div style={S.msgRole}>{t('chat.role.assistant')}</div>
                     <TypingDots />
                   </div>
                 </div>
@@ -616,7 +608,7 @@ export default function ChatPage() {
             <div style={S.inputArea}>
               {selectedRefs.length > 0 && (
                 <div>
-                  <span style={{ fontSize: 11, color: '#64748b' }}>Referencias desta mensagem:</span>
+                  <span style={{ fontSize: 11, color: '#64748b' }}>{t('chat.input.thisMsg')}</span>
                   <div style={S.chips}>
                     {selectedRefs.map(r => (
                       <span key={r.type + ':' + r.id} style={S.chip}>
@@ -641,12 +633,12 @@ export default function ChatPage() {
                   onClick={() => setShowRefModal(true)}
                   disabled={isSending}
                 >
-                  + Ref
+                  {t('chat.input.addRef')}
                 </button>
                 <textarea
                   ref={textareaRef}
                   style={{ ...S.textarea, ...(inputError ? S.textareaError : {}) }}
-                  placeholder={isSending ? 'Aguardando...' : 'Digite sua mensagem (Enter envia, Shift+Enter nova linha)'}
+                  placeholder={isSending ? t('chat.input.waiting') : t('chat.input.ph')}
                   value={input}
                   onChange={e => { setInput(e.target.value); setInputError(false) }}
                   onKeyDown={e => {
@@ -662,7 +654,7 @@ export default function ChatPage() {
                 <button
                   type="submit"
                   style={isSending ? { ...S.sendBtn, ...S.sendBtnBusy } : S.sendBtn}
-                  title="Enviar mensagem"
+                  title={t('chat.input.send')}
                 >
                   {isSending ? '...' : '▶'}
                 </button>

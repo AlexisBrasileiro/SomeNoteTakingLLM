@@ -1,8 +1,10 @@
 ﻿import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
+import { useT } from './context/I18nContext'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { SetupProvider, useSetup } from './context/SetupContext'
 import { SidebarRefreshProvider } from './context/SidebarRefreshContext'
+import { I18nProvider } from './context/I18nContext'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import NotesPage from './pages/NotesPage'
@@ -25,6 +27,7 @@ function SetupGuard({ children }: { children: React.ReactNode }) {
   const { status, loading } = useSetup()
   const navigate = useNavigate()
   const location = useLocation()
+  const t = useT()
 
   useEffect(() => {
     if (loading) return
@@ -36,7 +39,7 @@ function SetupGuard({ children }: { children: React.ReactNode }) {
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a' }}>
-        <p style={{ color: '#475569', fontSize: 15 }}>Iniciando...</p>
+        <p style={{ color: '#475569', fontSize: 15 }}>{t('app.starting')}</p>
       </div>
     )
   }
@@ -66,13 +69,15 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <SetupProvider>
-        <SidebarRefreshProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
-        </SidebarRefreshProvider>
-      </SetupProvider>
+      <I18nProvider>
+        <SetupProvider>
+          <SidebarRefreshProvider>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </SidebarRefreshProvider>
+        </SetupProvider>
+      </I18nProvider>
     </AuthProvider>
   )
 }

@@ -81,7 +81,8 @@ services:
     container_name: sntllm-web
     depends_on:
       - api
-    # porta não exposta ao host — acesso via api (proxy reverso ou mesmo host)
+    ports:
+      - "3000:80"
     networks:
       - sntllm-net
 

@@ -431,8 +431,8 @@ function LlmTab() {
   const testConnection = async (url: string, setter: (s: 'idle' | 'ok' | 'error') => void) => {
     setter('idle')
     try {
-      const resp = await fetch(`${url}/api/tags`)
-      setter(resp.ok ? 'ok' : 'error')
+      const r = await api.post<{ ok: boolean; statusCode?: number; error?: string }>('/ollama/test', { url })
+      setter(r.data.ok ? 'ok' : 'error')
     } catch {
       setter('error')
     }

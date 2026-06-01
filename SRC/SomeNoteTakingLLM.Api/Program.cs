@@ -11,6 +11,7 @@ using SomeNoteTakingLLM.Api.Modules.Admin;
 using SomeNoteTakingLLM.Api.Modules.Auth;
 using SomeNoteTakingLLM.Api.Modules.Chat;
 using SomeNoteTakingLLM.Api.Modules.Notes;
+using SomeNoteTakingLLM.Api.Modules.Ollama;
 using SomeNoteTakingLLM.Api.Modules.Paperless;
 using SomeNoteTakingLLM.Api.Modules.Projects;
 using SomeNoteTakingLLM.Api.Modules.Search;
@@ -107,6 +108,7 @@ app.MapNoteEndpoints();
 app.MapSetupEndpoints();
 app.MapAdminEndpoints();
 app.MapPaperlessEndpoints();
+app.MapOllamaEndpoints();
 app.MapChatEndpoints();
 app.MapSearchEndpoints();
 

@@ -24,7 +24,7 @@ public static class NoteEndpoints
         group.MapDelete("/{id:guid}", Delete);
 
         return app;
-    }
+        }
 
     private static Guid GetUserId(ClaimsPrincipal user) =>
         Guid.Parse(user.FindFirstValue(JwtRegisteredClaimNames.Sub)!);
@@ -147,6 +147,35 @@ public static class NoteEndpoints
         note.ProjectId = request.ProjectId;
         note.NoteDate = request.NoteDate;
         note.NoteType = request.NoteType;
+
+        // Se houve mudança de parent, validar e recalcular profundidade
+        if (request.ParentNoteId != note.ParentNoteId)
+        {
+            int newDepth = 0;
+            if (request.ParentNoteId.HasValue)
+            {
+                var parent = await db.Notes.FirstOrDefaultAsync(n => n.Id == request.ParentNoteId.Value && n.OwnerId == ownerId);
+                if (parent is null) return Results.BadRequest(new { message = "Nota pai nao encontrada." });
+
+                // Evitar ciclos: parent nao pode ser um descendente da nota
+                var cursor = parent;
+                while (cursor is not null)
+                {
+                    if (cursor.Id == note.Id)
+                        return Results.BadRequest(new { message = "Nao e permitido aninhar uma nota dentro de sua propria sub-arvore." });
+                    if (cursor.ParentNoteId is null) break;
+                    cursor = await db.Notes.FirstOrDefaultAsync(n => n.Id == cursor.ParentNoteId && n.OwnerId == ownerId);
+                }
+
+                newDepth = parent.Depth + 1;
+                if (newDepth > MaxDepth)
+                    return Results.BadRequest(new { message = $"Profundidade maxima de {MaxDepth} niveis atingida." });
+            }
+
+            note.ParentNoteId = request.ParentNoteId;
+            note.Depth = newDepth;
+        }
+
         note.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         _ = Task.Run(() => SyncToChromaAsync(note, db, chroma, config));

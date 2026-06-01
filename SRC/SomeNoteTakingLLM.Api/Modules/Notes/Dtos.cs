@@ -3,7 +3,7 @@
 namespace SomeNoteTakingLLM.Api.Modules.Notes;
 
 public sealed record CreateNoteRequest(string? Title, string? Content, Guid? ProjectId, Guid? ParentNoteId, DateTime? NoteDate, NoteType NoteType = NoteType.FreeNote);
-public sealed record UpdateNoteRequest(string? Title, string? Content, Guid? ProjectId, DateTime? NoteDate, NoteType NoteType = NoteType.FreeNote);
+public sealed record UpdateNoteRequest(string? Title, string? Content, Guid? ProjectId, Guid? ParentNoteId, DateTime? NoteDate, NoteType NoteType = NoteType.FreeNote);
 public sealed record MoveNoteRequest(Guid? ProjectId, Guid? ParentNoteId);
 
 public sealed record NoteResponse(

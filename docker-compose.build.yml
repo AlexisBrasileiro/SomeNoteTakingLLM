@@ -1,0 +1,98 @@
+name: sntllm
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: sntllm-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_pass
+      MYSQL_DATABASE: somenotetakingllm
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_pass
+    # porta não exposta ao host — acessível apenas pela rede interna
+    volumes:
+      - /mnt/tmp/tst/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$${MYSQL_USER} -p$${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sntllm-net
+
+  chromadb:
+    image: chromadb/chroma:0.5.23
+    container_name: sntllm-chromadb
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+      CHROMA_HOST_ADDR: "0.0.0.0"
+      CHROMA_HOST_PORT: "8000"
+    # porta não exposta ao host — acessível apenas pela rede interna
+    volumes:
+      - /mnt/tmp/tst/chroma:/chroma/chroma
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sntllm-net
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: sntllm-searxng
+    environment:
+      SEARXNG_BASE_URL: "http://localhost:8888/"
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./Scripts/searxng:/etc/searxng:rw
+    networks:
+      - sntllm-net
+
+  api:
+    container_name: sntllm-api
+    build:
+      context: ./SRC/SomeNoteTakingLLM.Api
+      dockerfile: Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Default: Server=mysql;Port=3306;Database=somenotetakingllm;User ID=app_user;Password=app_pass;
+      Jwt__SecretKey: SomeNoteTakingLLM_SuperSecretKey_MinLength32Chars!
+      Jwt__Issuer: SomeNoteTakingLLM
+      Jwt__Audience: SomeNoteTakingLLM.Clients
+      Jwt__AccessTokenExpirationMinutes: "60"
+      Chroma__Url: "http://chromadb:8000"
+      Searxng__Url: "http://searxng:8080"
+      Searxng__PublicUrl: "http://localhost:8888"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    networks:
+      - sntllm-net
+
+  web:
+    container_name: sntllm-web
+    build:
+      context: ./SRC/sntllm-web
+      dockerfile: Dockerfile
+    depends_on:
+      - api
+    ports:
+      - "3000:80"
+    networks:
+      - sntllm-net
+
+# Volumes are mapped to host paths above. No named volumes needed.
+
+networks:
+  sntllm-net:
+    name: sntllm-net
+    driver: bridge

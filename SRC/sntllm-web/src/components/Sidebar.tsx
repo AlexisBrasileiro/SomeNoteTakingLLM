@@ -188,7 +188,6 @@ function NoteRow({ note, indent, noteOpen, onToggle, dragHandlers }: {
         <span style={{ ...s.label, color: isActive ? '#fff' : '#cbd5e1' }}>
           {note.title || 'Sem título'}
         </span>
-      </div>
               <button
                 style={{
                   background: 'none',
@@ -211,6 +210,7 @@ function NoteRow({ note, indent, noteOpen, onToggle, dragHandlers }: {
               >
                 +
               </button>
+      </div>
       {open && note.children.map(c => (
         <NoteRow key={c.id} note={c} indent={indent + 12} noteOpen={noteOpen} onToggle={onToggle} dragHandlers={dragHandlers} />
       ))}
@@ -218,39 +218,13 @@ function NoteRow({ note, indent, noteOpen, onToggle, dragHandlers }: {
   )
 }
 
-function CalNoteRow({ note, dragHandlers }: { note: Note; dragHandlers?: DragHandlers }) {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const isActive = location.pathname === `/notes/${note.id}`
-  const dh = dragHandlers
-  const isDragging = dh?.dragNoteId === note.id
-  return (
-    <div
-      draggable={!!dh}
-      style={{
-        ...s.row,
-        paddingLeft: 72,
-        background: isActive ? '#312e81' : undefined,
-        opacity: isDragging ? 0.4 : 1,
-      }}
-      onClick={() => navigate(`/notes/${note.id}`)}
-      onDragStart={dh ? e => { e.dataTransfer.setData('noteId', note.id); dh.onDragStart(note.id) } : undefined}
-      onDragEnd={dh ? () => dh.onDragEnd() : undefined}
-    >
-      <span style={s.gap} />
-      <span style={s.icon}>📄</span>
-      <span style={{ ...s.label, fontSize: 12, color: isActive ? '#fff' : '#cbd5e1' }}>
-        {note.title || 'Sem título'}
-      </span>
-    </div>
-  )
-}
-
-function CalDayRow({ day, isOpen, onToggle, dragHandlers }: {
+function CalDayRow({ day, isOpen, onToggle, dragHandlers, noteOpen, noteToggle }: {
   day: { dateKey: string; label: string; container: Note | null; children: Note[] }
   isOpen: boolean
   onToggle: () => void
   dragHandlers?: DragHandlers
+  noteOpen: Record<string, boolean>
+  noteToggle: (nid: string) => void
 }) {
   const navigate = useNavigate()
   const location = useLocation()
@@ -290,7 +264,12 @@ function CalDayRow({ day, isOpen, onToggle, dragHandlers }: {
         )}
       </div>
       {/* L5: filhos */}
-      {isOpen && day.children.map(n => <CalNoteRow key={n.id} note={n} dragHandlers={dragHandlers} />)}
+      {isOpen && (
+        // Renderizar filhos como árvore para respeitar aninhamento arbitrário
+        buildTree(day.children).map(n => (
+          <NoteRow key={n.id} note={n} indent={72} noteOpen={noteOpen} onToggle={noteToggle} dragHandlers={dragHandlers} />
+        ))
+      )}
     </div>
   )
 }
@@ -596,6 +575,8 @@ export default function Sidebar() {
                           isOpen={!!st.days[day.dateKey]}
                           onToggle={() => toggleDay(pid, day.dateKey)}
                           dragHandlers={dragHandlers}
+                          noteOpen={st.noteOpen}
+                          noteToggle={(nid: string) => toggleNote(pid, nid)}
                         />
                       ))}
                     </div>
@@ -765,6 +746,7 @@ const s: Record<string, React.CSSProperties> = {
     height: '100vh', overflow: 'hidden',
     borderRight: '1px solid #334155',
     userSelect: 'none',
+    resize: 'vertical',
   },
   logoRow: {
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -810,9 +792,9 @@ const s: Record<string, React.CSSProperties> = {
     padding: '0.28rem 0.5rem',
     cursor: 'pointer', borderRadius: 6, margin: '1px 4px',
   },
-  chevron: { fontSize: 10, color: '#475569', width: 12, flexShrink: 0 },
+  chevron: { fontSize: 14, color: '#475569', width: 12, flexShrink: 0 },
   gap:     { width: 12, flexShrink: 0 },
-  icon:    { fontSize: 12, flexShrink: 0 },
+  icon:    { fontSize: 14, flexShrink: 0 },
   label: {
     flex: 1, fontSize: 13, color: '#94a3b8',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

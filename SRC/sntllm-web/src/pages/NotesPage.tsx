@@ -3,22 +3,71 @@ import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
 import type { Note } from '../types'
 
-function NoteTreeItem({ note, depth, onSelect }: { note: Note & { children?: Note[] }, depth: number, onSelect: (id: string) => void }) {
+function NoteTreeItem({ note, depth, onSelect, onMove, onCreateChild }: { note: Note & { children?: Note[] }, depth: number, onSelect: (id: string) => void, onMove: () => void, onCreateChild: (parentId: string) => void }) {
   const [expanded, setExpanded] = useState(false)
+
+  const handleDragStart = (e: any) => {
+    e.dataTransfer.setData('text/plain', note.id)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e: any) => {
+    e.preventDefault()
+  }
+
+  const handleDrop = async (e: any) => {
+    e.preventDefault()
+    const draggedId = e.dataTransfer.getData('text/plain')
+    if (!draggedId || draggedId === note.id) return
+    try {
+      const r = await api.get<Note>(`/notes/${draggedId}`)
+      const dragged = r.data
+      const payload = {
+        title: dragged.title ?? null,
+        content: dragged.content ?? null,
+        projectId: dragged.projectId || null,
+        parentNoteId: note.id,
+        noteDate: dragged.noteDate ? new Date(dragged.noteDate).toISOString() : null,
+        noteType: dragged.noteType,
+      }
+      // send update to set new parent
+      await api.put(`/notes/${draggedId}`, payload)
+      onMove()
+    } catch (err) {
+      // ignore, backend will respond with meaningful error
+      console.error('Erro ao mover nota', err)
+      onMove()
+    }
+  }
 
   return (
     <div style={{ marginLeft: depth * 20 }}>
-      <div style={styles.treeItem} onClick={() => onSelect(note.id)}>
+      <div
+        style={styles.treeItem}
+        onClick={() => onSelect(note.id)}
+        draggable
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
         {note.children && note.children.length > 0 && (
           <button style={styles.expandBtn} onClick={(e) => { e.stopPropagation(); setExpanded(!expanded) }}>
             {expanded ? '▼' : '▶'}
           </button>
         )}
         <span style={styles.treeTitle}>{note.title || 'Sem título'}</span>
-        <span style={styles.treeDepth}>nível {note.depth}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={styles.treeDepth}>{note.children?.length ?? 0}</span>
+          <button
+            title="Nova sub-nota"
+            style={styles.addChildBtn}
+            onClick={(e) => { e.stopPropagation(); onCreateChild(note.id) }}
+          >+</button>
+          <span style={styles.treeDepth}>nível {note.depth}</span>
+        </div>
       </div>
       {expanded && note.children?.map(child => (
-        <NoteTreeItem key={child.id} note={child} depth={depth + 1} onSelect={onSelect} />
+        <NoteTreeItem key={child.id} note={child} depth={depth + 1} onSelect={onSelect} onMove={onMove} onCreateChild={onCreateChild} />
       ))}
     </div>
   )
@@ -28,8 +77,10 @@ export default function NotesPage() {
   const [notes, setNotes] = useState<Note[]>([])
   const navigate = useNavigate()
 
+  const reloadNotes = () => api.get<Note[]>('/notes').then(r => setNotes(r.data)).catch(() => {})
+
   useEffect(() => {
-    api.get<Note[]>('/notes').then(r => setNotes(r.data))
+    reloadNotes()
   }, [])
 
   const noteMap = new Map<string, Note & { children: Note[] }>()
@@ -52,7 +103,14 @@ export default function NotesPage() {
       <div style={styles.tree}>
         {roots.length === 0 && <p style={styles.empty}>Nenhuma nota encontrada.</p>}
         {roots.map(n => (
-          <NoteTreeItem key={n.id} note={n} depth={0} onSelect={(id) => navigate(`/notes/${id}`)} />
+          <NoteTreeItem
+            key={n.id}
+            note={n}
+            depth={0}
+            onSelect={(id) => navigate(`/notes/${id}`)}
+            onMove={() => reloadNotes()}
+            onCreateChild={(parentId) => navigate('/notes/new', { state: { parentNoteId: parentId } })}
+          />
         ))}
       </div>
     </div>
@@ -69,5 +127,6 @@ const styles: Record<string, React.CSSProperties> = {
   expandBtn: { background: 'none', border: 'none', color: '#6366f1', cursor: 'pointer', width: 20, fontSize: 10 },
   treeTitle: { flex: 1, fontSize: 14, fontWeight: 500 },
   treeDepth: { fontSize: 11, color: '#475569' },
+  addChildBtn: { background: 'none', border: '1px solid #334155', color: '#94a3b8', borderRadius: 6, width: 22, height: 22, cursor: 'pointer' },
   empty: { color: '#475569', textAlign: 'center' },
 }

@@ -39,7 +39,8 @@ export default function NoteEditorPage() {
   const handleNoteTypeChange = (t: NoteType) => {
     setNoteType(t)
     if (t === 1 && !noteDate) setNoteDate(todayIso)
-    if (t !== 1) setParentNoteId('')
+    // Apenas limpar parent quando for Chat (tipo 3), permitir aninhar para Free/Calendar/Document
+    if (t === 3) setParentNoteId('')
   }
 
   useEffect(() => {
@@ -156,12 +157,12 @@ export default function NoteEditorPage() {
             </>
           )}
 
-          {noteType === 0 && (
+          {noteType !== 3 && (
             <>
               <label style={styles.metaLabel}>Nota pai</label>
               <select style={styles.select} value={parentNoteId} onChange={e => setParentNoteId(e.target.value)}>
                 <option value="">Nenhuma</option>
-                {notes.filter(n => n.id !== id && n.noteType === 0).map(n => (
+                {notes.filter(n => n.id !== id && n.noteType !== 3).map(n => (
                   <option key={n.id} value={n.id}>{n.title || 'Sem título'} (nível {n.depth})</option>
                 ))}
               </select>

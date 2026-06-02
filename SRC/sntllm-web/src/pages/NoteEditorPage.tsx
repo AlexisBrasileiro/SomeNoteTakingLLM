@@ -258,8 +258,8 @@ export default function NoteEditorPage() {
                         {effectiveTags.map(tag => <span key={tag} style={styles.effectiveTag}>#{tag}</span>)}
                       </div>
                     </div>
-              </div>
-              )}
+                  )}
+                </div>
               </div>
             </div>
           </div>

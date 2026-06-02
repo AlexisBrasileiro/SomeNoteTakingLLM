@@ -207,59 +207,61 @@ export default function NoteEditorPage() {
             style={{ flex: 1, minHeight: 400 }}
           />
           <div style={{ display: 'flex', gap: 20, marginTop: 20, flexWrap: 'wrap' }}>
-          <div style={{ width: '48%', marginRight: '1%' }}>
-            <div>
-              {projectId && (
-                <div style={{ marginTop: 16 }}>
-                  <PaperlessDocumentsPanel
-                    projectId={projectId}
-                    projectName={projects.find(p => p.id === projectId)?.name}
+            <div style={{ width: '48%', marginRight: '1%' }}>
+              <div>
+                {projectId && (
+                  <div style={{ marginTop: 16 }}>
+                    <PaperlessDocumentsPanel
+                      projectId={projectId}
+                      projectName={projects.find(p => p.id === projectId)?.name}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+            <div style={{ width: '48%', marginLeft: '1%' }}>
+              <div style={styles.tagsPanel}>
+                <label style={styles.metaLabel}>Tags próprias</label>
+                <div style={styles.tagsComposer}>
+                  <input
+                    style={styles.tagInput}
+                    placeholder="Digite uma tag e pressione Enter"
+                    value={tagInput}
+                    onChange={e => setTagInput(e.target.value)}
+                    onKeyDown={handleTagKeyDown}
                   />
+                  <button style={styles.tagAddBtn} type="button" onClick={() => addTag(tagInput)}>Adicionar</button>
                 </div>
+                <div style={styles.tagList}>
+                  {tags.length === 0 && <span style={styles.tagHint}>Nenhuma tag própria definida.</span>}
+                  {tags.map(tag => (
+                    <button key={tag} type="button" style={styles.tagButton} onClick={() => removeTag(tag)}>
+                      #{tag} ×
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'none' }}>
+                  {parentNoteId && inheritedTags.length > 0 && (
+                    <div style={styles.inheritanceBox}>
+                      <span style={styles.inheritanceTitle}>Tags herdadas da nota pai</span>
+                      <div style={styles.tagList}>
+                        {inheritedTags.map(tag => <span key={tag} style={styles.inheritedTag}>#{tag}</span>)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'none' }}>
+                  {effectiveTags.length > 0 && (
+                    <div style={styles.inheritanceBox}>
+                      <span style={styles.inheritanceTitle}>Tags efetivas desta nota</span>
+                      <div style={styles.tagList}>
+                        {effectiveTags.map(tag => <span key={tag} style={styles.effectiveTag}>#{tag}</span>)}
+                      </div>
+                    </div>
+              </div>
               )}
+              </div>
             </div>
-          </div>
-          <div style={{ width: '48%', marginLeft: '1%' }}>
-            <div style={styles.tagsPanel}>
-              <label style={styles.metaLabel}>Tags próprias</label>
-              <div style={styles.tagsComposer}>
-                <input
-                  style={styles.tagInput}
-                  placeholder="Digite uma tag e pressione Enter"
-                  value={tagInput}
-                  onChange={e => setTagInput(e.target.value)}
-                  onKeyDown={handleTagKeyDown}
-                />
-                <button style={styles.tagAddBtn} type="button" onClick={() => addTag(tagInput)}>Adicionar</button>
-              </div>
-              <div style={styles.tagList}>
-                {tags.length === 0 && <span style={styles.tagHint}>Nenhuma tag própria definida.</span>}
-                {tags.map(tag => (
-                  <button key={tag} type="button" style={styles.tagButton} onClick={() => removeTag(tag)}>
-                    #{tag} ×
-                  </button>
-                ))}
-              </div>
-              <div style={{display: 'none'}}>
-              {parentNoteId && inheritedTags.length > 0 && (
-                <div style={styles.inheritanceBox}>
-                  <span style={styles.inheritanceTitle}>Tags herdadas da nota pai</span>
-                  <div style={styles.tagList}>
-                    {inheritedTags.map(tag => <span key={tag} style={styles.inheritedTag}>#{tag}</span>)}
-                  </div>
-                </div>
-              )}
-              </div>
-              {effectiveTags.length > 0 && (
-                <div style={styles.inheritanceBox}>
-                  <span style={styles.inheritanceTitle}>Tags efetivas desta nota</span>
-                  <div style={styles.tagList}>
-                    {effectiveTags.map(tag => <span key={tag} style={styles.effectiveTag}>#{tag}</span>)}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
           </div>
         </div>
       </div>

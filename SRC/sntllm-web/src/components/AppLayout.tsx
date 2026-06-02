@@ -1,7 +1,5 @@
 import type { ReactNode } from 'react'
 import Sidebar from './Sidebar'
-import { SearchBar } from './SearchBar'
-import { SearchResults } from './SearchResults'
 
 interface AppLayoutProps {
   children: ReactNode

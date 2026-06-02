@@ -204,7 +204,8 @@ export default function NoteEditorPage() {
             value={content}
             onChange={(v) => setContent(v ?? '')}
             height="100%"
-            style={{ flex: 1, minHeight: 400 }}
+            style={{ flex: 1, minHeight: 400, whiteSpace: 'pre-wrap' }}
+        visibleDragbar={false}
           />
           <div style={{ display: 'flex', gap: 20, marginTop: 20, flexWrap: 'wrap' }}>
           <div style={{ width: '48%', marginRight: '1%' }}>
@@ -245,14 +246,6 @@ export default function NoteEditorPage() {
                   <span style={styles.inheritanceTitle}>Tags herdadas da nota pai</span>
                   <div style={styles.tagList}>
                     {inheritedTags.map(tag => <span key={tag} style={styles.inheritedTag}>#{tag}</span>)}
-                  </div>
-                </div>
-              )}
-              {effectiveTags.length > 0 && (
-                <div style={styles.inheritanceBox}>
-                  <span style={styles.inheritanceTitle}>Tags efetivas desta nota</span>
-                  <div style={styles.tagList}>
-                    {effectiveTags.map(tag => <span key={tag} style={styles.effectiveTag}>#{tag}</span>)}
                   </div>
                 </div>
               )}

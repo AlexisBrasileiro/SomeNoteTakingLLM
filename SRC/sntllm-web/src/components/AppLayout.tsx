@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 import Sidebar from './Sidebar'
+import { SearchBar } from './SearchBar'
+import { SearchResults } from './SearchResults'
 
 interface AppLayoutProps {
   children: ReactNode
@@ -10,6 +12,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#0f172a', color: '#f8fafc' }}>
       <Sidebar />
       <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+
         {children}
       </main>
     </div>

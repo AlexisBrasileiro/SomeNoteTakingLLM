@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useSidebarRefresh } from '../context/SidebarRefreshContext'
 import api from '../api/client'
+import { SearchBar } from './SearchBar'
 import type { Project, Note, NoteType } from '../types'
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -629,6 +630,9 @@ export default function Sidebar() {
         <span style={s.logo}>📓 SNT</span>
         <button style={s.iconBtn} onClick={refresh} title="Atualizar">↺</button>
       </div>
+      <div style={s.divider} />
+      
+      <SearchBar />
 
       {/* Tree */}
       <div style={s.tree}>

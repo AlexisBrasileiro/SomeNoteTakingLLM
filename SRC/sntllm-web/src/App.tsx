@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import { SetupProvider, useSetup } from './context/SetupContext'
 import { SidebarRefreshProvider } from './context/SidebarRefreshContext'
 import { I18nProvider } from './context/I18nContext'
+import { SearchProvider } from './components/SearchContext'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import NotesPage from './pages/NotesPage'
@@ -72,9 +73,11 @@ export default function App() {
       <I18nProvider>
         <SetupProvider>
           <SidebarRefreshProvider>
-            <BrowserRouter>
-              <AppRoutes />
-            </BrowserRouter>
+            <SearchProvider>
+              <BrowserRouter>
+                <AppRoutes />
+              </BrowserRouter>
+            </SearchProvider>
           </SidebarRefreshProvider>
         </SetupProvider>
       </I18nProvider>

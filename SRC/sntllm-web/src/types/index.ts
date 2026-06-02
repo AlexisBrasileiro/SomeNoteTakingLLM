@@ -57,3 +57,15 @@ export interface ChatSummary {
   updatedAt: string
 }
 
+export type SearchQuery = {
+  query: string;
+  category?: 'all' | 'tags' | 'dates' | 'projects';
+}
+
+export type SearchResult = {
+  id: string;
+  title: string;
+  type: 'note' | 'project' | 'tag';
+  createdAt?: string;
+}
+

@@ -27,7 +27,7 @@ interface ProjectSummaryAdmin {
   createdAt: string
 }
 
-type Tab = 'users' | 'projects' | 'theme' | 'llm' | 'paperless' | 'auth' | 'language'
+type Tab = 'users' | 'projects' | 'theme' | 'llm' | 'paperless' | 'auth' | 'language' | 'system'
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
@@ -47,7 +47,7 @@ export default function SettingsPage() {
       <div style={s.page}>
         <h1 style={s.title}>⚙️ {t('settings.title')}</h1>
         <div style={s.tabs}>
-          {(['users', 'projects', 'theme', 'llm', 'paperless', 'auth', 'language'] as Tab[]).map(tb => (
+          {(['users', 'projects', 'theme', 'llm', 'paperless', 'auth', 'language', 'system'] as Tab[]).map(tb => (
             <button
               key={tb}
               style={{ ...s.tab, ...(tab === tb ? s.tabActive : {}) }}
@@ -65,6 +65,7 @@ export default function SettingsPage() {
           {tab === 'paperless' && <PaperlessTab />}
           {tab === 'auth'      && <AuthTab />}
           {tab === 'language'  && <LanguageTab />}
+          {tab === 'system'    && <SystemTab />}
         </div>
       </div>
     </AppLayout>
@@ -80,10 +81,10 @@ function tabLabel(tb: Tab, t: (k: string) => string) {
     paperless: `📄 ${t('settings.tabs.paperless')}`,
     auth: `🔐 ${t('settings.tabs.auth')}`,
     language: `🌐 ${t('settings.tabs.language')}`,
+    system: `⚙️ ${t('settings.tabs.system')}`
   }
   return map[tb]
 }
-
 // ── Users Tab ─────────────────────────────────────────────────────────────────
 
 function UsersTab() {
@@ -770,6 +771,77 @@ function LanguageTab() {
             {lang === l.code && <span style={{ marginLeft: 'auto' }}>✓</span>}
           </button>
         ))}
+      </div>
+    </div>
+  )
+}
+
+// ── System Tab ──────────────────────────────────────────────────────────────────
+
+function SystemTab() {
+  const [baseUrl, setBaseUrl] = useState('')
+  const [searxUrl, setSearxUrl] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+  const t = useT()
+
+  useEffect(() => {
+    api.get<Record<string, string>>('/admin/settings').then(r => {
+      const d = r.data
+      if (d['system.baseUrl']) setBaseUrl(d['system.baseUrl'])
+      if (d['system.searxUrl']) setSearxUrl(d['system.searxUrl'])
+    }).catch(() => {})
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api.put('/admin/settings', {
+        settings: {
+          'system.baseUrl': baseUrl,
+          'system.searxUrl': searxUrl,
+        },
+      })
+      setMsg(t('common.saved'))
+    } catch {
+      setMsg(t('common.saveError'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ maxWidth: 520 }}>
+      {msg && <div style={s.toast}>{msg} <button style={s.toastClose} onClick={() => setMsg('')}>✕</button></div>}
+      
+      <h3 style={s.sectionTitle}>{t('settings.system.title') || 'Configurações do Sistema'}</h3>
+      
+      <label style={s.label}>{t('settings.system.baseUrl') || 'URL Base do Servidor'}</label>
+      <input 
+        style={s.input} 
+        value={baseUrl} 
+        onChange={e => setBaseUrl(e.target.value)} 
+        placeholder="http://192.168.1.10:5000" 
+      />
+      <div style={{ fontSize: 11, color: '#64748b', marginBottom: 16 }}>
+        {t('settings.system.baseUrlHint') || 'URL usada para acessos externos e integrações.'}
+      </div>
+
+      <label style={s.label}>{t('settings.system.searxUrl') || 'URL do SearXNG'}</label>
+      <input 
+        style={s.input} 
+        value={searxUrl} 
+        onChange={e => setSearxUrl(e.target.value)} 
+        placeholder="http://localhost:8888" 
+      />
+      <div style={{ fontSize: 11, color: '#64748b', marginBottom: 16 }}>
+        {t('settings.system.searxUrlHint') || 'URL da instância do SearXNG para buscas na web.'}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 24 }}>
+        <button style={s.accentBtn} onClick={save} disabled={saving}>
+          {saving ? t('common.saving') : `💾 ${t('common.save')}`}
+        </button>
       </div>
     </div>
   )

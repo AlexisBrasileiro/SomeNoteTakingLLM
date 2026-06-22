@@ -1,4 +1,5 @@
-name: sntllm
+# Use um arquivo .env para definir VOLUME_BASE=C:/tmp
+# ou defina como variável de ambiente no sistema.
 
 services:
   mysql:
@@ -11,7 +12,7 @@ services:
       MYSQL_PASSWORD: app_pass
     # porta não exposta ao host — acessível apenas pela rede interna
     volumes:
-      - /mnt/tmp/tst/mysql:/var/lib/mysql
+      - ${VOLUME_BASE:-C:/tmp}/mysql:/var/lib/mysql
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$${MYSQL_USER} -p$${MYSQL_PASSWORD}"]
       interval: 10s
@@ -30,7 +31,7 @@ services:
       CHROMA_HOST_PORT: "8000"
     # porta não exposta ao host — acessível apenas pela rede interna
     volumes:
-      - /mnt/tmp/tst/chroma:/chroma/chroma
+      - ${VOLUME_BASE:-C:/tmp}/chroma:/chroma/chroma
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
       interval: 15s
@@ -56,6 +57,8 @@ services:
     build:
       context: ./SRC/SomeNoteTakingLLM.Api
       dockerfile: Dockerfile
+      args:
+        RESTORE_PATH: /root/.nuget/packages
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Default: Server=mysql;Port=3306;Database=somenotetakingllm;User ID=app_user;Password=app_pass;

@@ -88,16 +88,16 @@ function buildCalendar(notes: Note[]): CalYear[] {
   }
 
   return [...map.entries()]
-    .sort((a, b) => b[0].localeCompare(a[0]))
+.sort((a, b) => MONTH_NAMES[parseInt(a[0].split('-')[1], 10) - 1].localeCompare(MONTH_NAMES[parseInt(b[0].split('-')[1], 10) - 1]))
     .map(([year, months]) => ({
       year,
       months: [...months.entries()]
-        .sort((a, b) => b[0].localeCompare(a[0]))
+        .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([mk, days]) => ({
           key: mk,
           label: MONTH_NAMES[parseInt(mk.split('-')[1]) - 1],
           days: [...days.entries()]
-            .sort((a, b) => b[0].localeCompare(a[0]))
+            .sort((a, b) => a[0].localeCompare(b[0]))
             .map(([dk, { container, children }]) => {
               const p = dk.split('-')
               return { dateKey: dk, label: `${p[2]}/${p[1]}/${p[0]}`, container, children }

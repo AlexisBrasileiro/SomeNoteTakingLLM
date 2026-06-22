@@ -69,9 +69,20 @@ In progress:
 
 Prerequisite: Docker Desktop running with Linux engine enabled.
 
+### 🚀 Installation (Fast Track)
+The project uses pre-published images for a quick start:
+
 ```bash
 docker compose pull
 docker compose up -d
+```
+
+### 🛠️ Development & Custom Build
+If you want to build the images from source:
+
+```bash
+# Use the build configuration
+docker compose -f docker-compose.build.yml up --build -d
 ```
 
 Main entry points:
@@ -103,8 +114,8 @@ The default placeholder paths in `docker-compose.yml` are:
 
 | Service  | Host path              | Container path      |
 |----------|------------------------|---------------------|
-| MySQL    | `/mnt/tmp/tst/mysql`   | `/var/lib/mysql`    |
-| ChromaDB | `/mnt/tmp/tst/chroma`  | `/chroma/chroma`    |
+| MySQL    | `/PontoCentral/mysql`   | `/var/lib/mysql`    |
+| ChromaDB | `/PontoCentral/chroma`  | `/chroma/chroma`    |
 
 **Before running for the first time**, replace the placeholder with the actual path where you want to store the data:
 

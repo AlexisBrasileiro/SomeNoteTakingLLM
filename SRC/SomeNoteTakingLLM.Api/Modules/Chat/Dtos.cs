@@ -1,7 +1,7 @@
 namespace SomeNoteTakingLLM.Api.Modules.Chat;
 
 public sealed record ChatReference(string Type, string Id, string Title);
-// Type: "note" | "paperless_document" | "paperless_tag"
+// Type: "note" | "paperless_document" | "paperless_tag" | "web"
 
 public sealed record CreateChatRequest(string Title, string? ProjectId);
 public sealed record SendMessageRequest(string Content, ChatReference[]? References, int? ContextDays);

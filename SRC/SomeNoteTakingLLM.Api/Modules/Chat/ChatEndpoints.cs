@@ -162,7 +162,9 @@ public static class ChatEndpoints
         SendMessageRequest request,
         ClaimsPrincipal user,
         SomeNoteTakingLlmDbContext db,
-        ChromaService chroma)
+        ChromaService chroma,
+        IConfiguration config,
+        IHttpClientFactory httpFactory)
     {
         var ownerId = GetUserId(user);
         var note = await db.Notes.FirstOrDefaultAsync(n => n.Id == id && n.OwnerId == ownerId && n.NoteType == NoteType.Chat);
@@ -221,7 +223,8 @@ public static class ChatEndpoints
         var contextString = await BuildContextAsync(
             db, ownerId, allRefs,
             note.ProjectId, request.ContextDays ?? 90,
-            request.Content, chroma, ollamaUrl, embeddingModel);
+            request.Content, chroma, ollamaUrl, embeddingModel,
+            config, httpFactory);
 
         // 6. Build system prompt + Ollama messages
         var systemContent = "Você é um assistente inteligente de anotações. Responda de forma clara, precisa e útil.";
@@ -299,7 +302,9 @@ public static class ChatEndpoints
         HttpContext httpContext,
         ClaimsPrincipal user,
         SomeNoteTakingLlmDbContext db,
-        ChromaService chroma)
+        ChromaService chroma,
+        IConfiguration config,
+        IHttpClientFactory httpFactory)
     {
         var ownerId = GetUserId(user);
         var request = await httpContext.Request.ReadFromJsonAsync<SendMessageRequest>(JsonOpts);
@@ -392,7 +397,8 @@ public static class ChatEndpoints
         var contextString = await BuildContextAsync(
             db, ownerId, allRefs,
             note.ProjectId, request.ContextDays ?? 90,
-            request.Content, chroma, ollamaUrl, embeddingModel);
+            request.Content, chroma, ollamaUrl, embeddingModel,
+            config, httpFactory);
 
         // 5. Build Ollama messages
         var systemContent = "Você é um assistente inteligente de anotações. Responda de forma clara, precisa e útil.";
@@ -491,7 +497,7 @@ public static class ChatEndpoints
 
     /// <summary>
     /// Builds the full LLM context string:
-    ///  1. User-selected refs (notes, paperless docs, paperless tags)
+    ///  1. User-selected refs (notes, paperless docs, paperless tags, web results)
     ///  2. All notes from the project edited within <paramref name="contextDays"/> days
     ///  3. Paperless docs belonging to the project's tag (if configured)
     /// </summary>
@@ -504,7 +510,9 @@ public static class ChatEndpoints
         string userQuery,
         ChromaService chroma,
         string ollamaUrl,
-        string embeddingModel)
+        string embeddingModel,
+        IConfiguration config,
+        IHttpClientFactory httpFactory)
     {
         var sb = new StringBuilder();
         var allNoteIds = new HashSet<Guid>();
@@ -579,6 +587,17 @@ public static class ChatEndpoints
                         }
                     }
                     catch { /* silently skip */ }
+                }
+                else if (refItem.Type == "web" && !string.IsNullOrWhiteSpace(refItem.Id))
+                {
+                    var webSnippet = await FetchSearxSnippetAsync(refItem.Id, refItem.Title, config, httpFactory);
+                    if (!string.IsNullOrWhiteSpace(webSnippet))
+                    {
+                        sb.AppendLine($"### Fonte web: {refItem.Title}");
+                        sb.AppendLine($"URL: {refItem.Id}");
+                        sb.AppendLine(webSnippet);
+                        sb.AppendLine();
+                    }
                 }
             }
         }
@@ -675,5 +694,60 @@ public static class ChatEndpoints
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Queries SearxNG for a result matching the given URL and returns its snippet/content.
+    /// Falls back to searching by title if URL match is not found.
+    /// </summary>
+    private static async Task<string?> FetchSearxSnippetAsync(string url, string? title, IConfiguration config, IHttpClientFactory httpFactory)
+    {
+        var searxUrl = config["Searxng:Url"];
+        if (string.IsNullOrWhiteSpace(searxUrl)) return null;
+
+        var query = !string.IsNullOrWhiteSpace(title) ? $"{title} {url}" : url;
+
+        try
+        {
+            using var client = httpFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(15);
+
+            var qs = $"?q={Uri.EscapeDataString(query)}&format=json&pageno=1";
+            var resp = await client.GetAsync($"{searxUrl.TrimEnd('/')}/search{qs}");
+            if (!resp.IsSuccessStatusCode) return null;
+
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("results", out var results)) return null;
+
+            foreach (var r in results.EnumerateArray())
+            {
+                if (r.TryGetProperty("url", out var u) &&
+                    string.Equals(u.GetString(), url, StringComparison.OrdinalIgnoreCase) &&
+                    r.TryGetProperty("content", out var c))
+                {
+                    return c.GetString();
+                }
+            }
+
+            // Fallback: return first result whose content contains the URL domain or title words
+            foreach (var r in results.EnumerateArray())
+            {
+                if (r.TryGetProperty("content", out var c))
+                {
+                    var content = c.GetString();
+                    if (!string.IsNullOrWhiteSpace(content))
+                    {
+                        if (!string.IsNullOrWhiteSpace(title) && content.Contains(title, StringComparison.OrdinalIgnoreCase))
+                            return content;
+                        if (content.Contains(new Uri(url).Host, StringComparison.OrdinalIgnoreCase))
+                            return content;
+                    }
+                }
+            }
+        }
+        catch { /* silently skip */ }
+
+        return null;
     }
 }

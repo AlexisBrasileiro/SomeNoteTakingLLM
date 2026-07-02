@@ -27,6 +27,7 @@ target "api" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64", "linux/arm64"]
   tags       = [image("sntllm-api")]
+  attest     = []
   cache-from = ["type=registry,ref=${image("sntllm-api")}-cache"]
   cache-to   = ["type=inline"]
 }
@@ -36,6 +37,7 @@ target "web" {
   dockerfile = "Dockerfile"
   platforms  = ["linux/amd64", "linux/arm64"]
   tags       = [image("sntllm-web")]
+  attest     = []
   cache-from = ["type=registry,ref=${image("sntllm-web")}-cache"]
   cache-to   = ["type=inline"]
 }

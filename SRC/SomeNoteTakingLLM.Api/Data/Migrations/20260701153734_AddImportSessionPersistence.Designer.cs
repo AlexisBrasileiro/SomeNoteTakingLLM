@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SomeNoteTakingLLM.Api.Data;
 
@@ -11,9 +12,11 @@ using SomeNoteTakingLLM.Api.Data;
 namespace SomeNoteTakingLLM.Api.Data.Migrations
 {
     [DbContext(typeof(SomeNoteTakingLlmDbContext))]
-    partial class SomeNoteTakingLlmDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260701153734_AddImportSessionPersistence")]
+    partial class AddImportSessionPersistence
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -170,18 +173,10 @@ namespace SomeNoteTakingLLM.Api.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("varchar(500)");
 
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("longtext");
-
-                    b.Property<string>("PathHash")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("varchar(32)");
-
                     b.Property<string>("RelativePath")
                         .IsRequired()
-                        .HasMaxLength(768)
-                        .HasColumnType("varchar(768)");
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -192,7 +187,8 @@ namespace SomeNoteTakingLLM.Api.Data.Migrations
 
                     b.HasIndex("ImportSessionId");
 
-                    b.HasIndex("ImportSessionId", "PathHash");
+                    b.HasIndex("ImportSessionId", "RelativePath")
+                        .IsUnique();
 
                     b.ToTable("ImportSessionFiles");
                 });

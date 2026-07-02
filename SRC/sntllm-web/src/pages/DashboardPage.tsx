@@ -49,6 +49,7 @@ export default function DashboardPage() {
             ))}
           </div>
           <button style={styles.viewAllBtn} onClick={() => navigate('/notes/new')}>+ Nova nota →</button>
+          <button style={{ ...styles.viewAllBtn, color: '#a78bfa', marginLeft: '1rem' }} onClick={() => navigate('/import')}>📦 Importar ZIP →</button>
         </section>
       </div>
     </AppLayout>

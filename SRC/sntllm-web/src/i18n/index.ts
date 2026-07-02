@@ -46,6 +46,7 @@ const pt_BR: Record<string, string> = {
   'layout.logout':     'Sair',
   'layout.newNote':    'Nova nota',
   'layout.newChat':    'Novo chat',
+  'layout.importZip':  'Importar ZIP',
 
   // Login
   'login.title':      'SomeNoteTakingLLM',
@@ -304,6 +305,7 @@ const en_US: Record<string, string> = {
   'layout.logout':     'Sign Out',
   'layout.newNote':    'New note',
   'layout.newChat':    'New chat',
+  'layout.importZip':  'Import ZIP',
 
   'login.title':      'SomeNoteTakingLLM',
   'login.email':      'E-mail',

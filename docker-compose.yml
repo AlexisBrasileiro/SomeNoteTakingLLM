@@ -52,8 +52,14 @@ services:
       - sntllm-net
 
   api:
-    image: alechizbr/sntllm-api:latest
+    image: somenotetakingllm-api:latest
     container_name: sntllm-api
+    build:
+      context: ./SRC/SomeNoteTakingLLM.Api
+      dockerfile: Dockerfile
+      provenance: false
+      args:
+        RESTORE_PATH: /root/.nuget/packages
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Default: Server=mysql;Port=3306;Database=somenotetakingllm;User ID=app_user;Password=app_pass;
@@ -64,6 +70,7 @@ services:
       Chroma__Url: "http://chromadb:8000"
       Searxng__Url: "http://searxng:8080"
       Searxng__PublicUrl: "http://localhost:8888"
+      Import__AssetsDir: "/app/assets/imports"
     depends_on:
       mysql:
         condition: service_healthy
@@ -73,12 +80,20 @@ services:
         condition: service_started
     ports:
       - "8080:8080"
+    volumes:
+      - /mnt/tmp/tst/assets/imports:/app/assets/imports
     networks:
       - sntllm-net
 
   web:
-    image: alechizbr/sntllm-web:latest
+    image: somenotetakingllm-web:latest
     container_name: sntllm-web
+    build:
+      context: ./SRC/sntllm-web
+      dockerfile: Dockerfile
+      provenance: false
+      args:
+        BUILDKIT_INLINE_CACHE: 1
     depends_on:
       - api
     ports:

@@ -10,6 +10,7 @@ using SomeNoteTakingLLM.Api.Infrastructure.Auth;
 using SomeNoteTakingLLM.Api.Modules.Admin;
 using SomeNoteTakingLLM.Api.Modules.Auth;
 using SomeNoteTakingLLM.Api.Modules.Chat;
+using SomeNoteTakingLLM.Api.Modules.Import;
 using SomeNoteTakingLLM.Api.Modules.Notes;
 using SomeNoteTakingLLM.Api.Modules.Ollama;
 using SomeNoteTakingLLM.Api.Modules.Paperless;
@@ -20,6 +21,18 @@ using SomeNoteTakingLLM.Api.Modules.Setup;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
+
+const long maxUploadSizeBytes = 256L * 1024 * 1024;
+
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = maxUploadSizeBytes;
+});
+
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = maxUploadSizeBytes;
+});
 
 var connectionString = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default nao configurada.");
@@ -55,6 +68,25 @@ builder.Services.AddSingleton<JwtService>();
 builder.Services.AddSingleton<StartupTracker>();
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton<ChromaService>();
+builder.Services.AddSingleton<HtmlToMarkdownService>();
+builder.Services.AddSingleton<ZipImportService>();
+builder.Services.AddSingleton<IImportSessionCache, ImportSessionCache>();
+
+// Cache distribuído opcional (Redis). Se a string de conexão não estiver
+// configurada, o cache fica inerte e a persistência passa a ser somente o MySQL.
+var redisConnectionString = builder.Configuration["Redis:ConnectionString"];
+if (!string.IsNullOrWhiteSpace(redisConnectionString))
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConnectionString;
+        options.InstanceName = "sntllm:";
+    });
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
 
 builder.Services.AddCors(options =>
 {
@@ -71,10 +103,48 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<SomeNoteTakingLlmDbContext>();
     db.Database.Migrate();
+
+    // Runtime migration: garante colunas adicionadas após a migration inicial
+    // já estar marcada como aplicada no __EFMigrationsHistory.
+    // Usa information_schema para ser idempotente.
+    db.Database.ExecuteSqlRaw(@"
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'ImportSessionFiles'
+    AND column_name = 'ErrorMessage'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE `ImportSessionFiles` ADD COLUMN `ErrorMessage` longtext CHARACTER SET utf8mb4 NULL;',
+  'SELECT 1;'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists := (
+  SELECT COUNT(*) FROM information_schema.columns
+  WHERE table_schema = DATABASE()
+    AND table_name = 'ImportSessions'
+    AND column_name = 'StartedAt'
+);
+SET @sql := IF(@col_exists = 0,
+  'ALTER TABLE `ImportSessions` ADD COLUMN `StartedAt` datetime(6) NULL;',
+  'SELECT 1;'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;");
 }
 
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
+
+// Servir arquivos estáticos da pasta de assets de importação
+var assetsDir = builder.Configuration["Import:AssetsDir"] ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "imports");
+if (!Directory.Exists(assetsDir))
+    Directory.CreateDirectory(assetsDir);
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(assetsDir),
+    RequestPath = "/assets/imports"
+});
 
 app.UseCors("Frontend");
 app.UseAuthentication();
@@ -111,6 +181,7 @@ app.MapPaperlessEndpoints();
 app.MapOllamaEndpoints();
 app.MapChatEndpoints();
 app.MapSearchEndpoints();
+app.MapImportEndpoints();
 
 // Admin: re-sync all notes to ChromaDB
 app.MapPost("/api/v1/admin/chroma/sync", async (

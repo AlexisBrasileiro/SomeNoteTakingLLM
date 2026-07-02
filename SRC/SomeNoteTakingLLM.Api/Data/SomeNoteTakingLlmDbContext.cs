@@ -17,6 +17,8 @@ public sealed class SomeNoteTakingLlmDbContext : DbContext
     public DbSet<NoteTag> NoteTags => Set<NoteTag>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ImportSession> ImportSessions => Set<ImportSession>();
+    public DbSet<ImportSessionFile> ImportSessionFiles => Set<ImportSessionFile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -117,6 +119,40 @@ public sealed class SomeNoteTakingLlmDbContext : DbContext
                   .HasForeignKey(m => m.ChatNoteId)
                   .OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(m => m.ChatNoteId);
+        });
+
+        modelBuilder.Entity<ImportSession>(entity =>
+        {
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.Status).HasMaxLength(20).IsRequired();
+            entity.Property(s => s.CurrentStage).HasMaxLength(20).IsRequired();
+            entity.Property(s => s.ExtractDir).HasMaxLength(500);
+            entity.Property(s => s.OllamaUrl).HasMaxLength(500);
+            entity.Property(s => s.OllamaModel).HasMaxLength(200);
+            entity.Property(s => s.ErrorMessage).HasColumnType("longtext");
+            entity.Property(s => s.StartedAt).HasColumnType("datetime(6)");
+            entity.HasIndex(s => s.OwnerId);
+            entity.HasIndex(s => s.ExpiresAt);
+
+            entity.HasMany(s => s.Files)
+                  .WithOne(f => f.ImportSession)
+                  .HasForeignKey(f => f.ImportSessionId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(s => s.Status);
+        });
+
+        modelBuilder.Entity<ImportSessionFile>(entity =>
+        {
+            entity.HasKey(f => f.Id);
+            entity.Property(f => f.RelativePath).HasMaxLength(768).IsRequired();
+            entity.Property(f => f.FileType).HasMaxLength(20).IsRequired();
+            entity.Property(f => f.Status).HasMaxLength(20).IsRequired();
+            entity.Property(f => f.ImportedNoteTitle).HasMaxLength(500);
+            entity.Property(f => f.ErrorMessage).HasColumnType("longtext");
+            entity.Property(f => f.PathHash).HasMaxLength(32).IsRequired();
+            entity.HasIndex(f => f.ImportSessionId);
+            entity.HasIndex(f => new { f.ImportSessionId, f.PathHash });
         });
     }
 }

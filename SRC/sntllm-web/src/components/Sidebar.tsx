@@ -725,6 +725,8 @@ export default function Sidebar() {
           onClick={() => navigate('/notes/new', { state: { projectId: activeProjectId, date: todayIso, noteType: 0 } })}
         >📝 Nova nota</button>
         <button style={s.navBtn} onClick={() => navigate('/chat/new')}>💬 Novo Chat</button>
+        <button style={s.navBtn} onClick={() => navigate('/import')}>📦 Importar ZIP</button>
+        <button style={s.navBtn} onClick={() => navigate('/hygiene')}>🧹 Higienização</button>
         {searxngUrl && (
           <button style={s.navBtn} onClick={() => window.open(searxngUrl, '_blank')}>🔍 SearxNG</button>
         )}

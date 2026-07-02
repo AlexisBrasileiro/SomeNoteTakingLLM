@@ -22,6 +22,10 @@ public static class NoteEndpoints
         group.MapPut("/{id:guid}", Update);
         group.MapPatch("/{id:guid}/move", Move);
         group.MapDelete("/{id:guid}", Delete);
+        group.MapPost("/delete-recursive", DeleteRecursive);
+        group.MapPost("/delete-preview", DeletePreview);
+        group.MapPost("/batch-move", BatchMove);
+        group.MapPost("/batch-tag", BatchTag);
 
         return app;
         }
@@ -394,5 +398,161 @@ public static class NoteEndpoints
                 await chroma.UpsertNoteAsync(note, ollamaUrl, embModel);
         }
         catch { /* best effort */ }
+    }
+
+    // ── Batch / Hygiene ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// POST /api/v1/notes/delete-preview
+    /// Body: { noteIds: [...] }
+    /// Retorna a lista de notas que seriam excluídas (incluindo sub-notas recursivamente).
+    /// </summary>
+    private static async Task<IResult> DeletePreview(
+        BatchDeleteRequest request,
+        ClaimsPrincipal user,
+        SomeNoteTakingLlmDbContext db)
+    {
+        var ownerId = GetUserId(user);
+        var allNotes = await db.Notes
+            .Where(n => n.OwnerId == ownerId)
+            .Select(n => new { n.Id, n.Title, n.ParentNoteId, n.Depth })
+            .ToListAsync();
+
+        var allIds = new HashSet<Guid>(allNotes.Select(n => n.Id));
+        var toDelete = new HashSet<Guid>();
+
+        // Coleta recursivamente todas as sub-notas
+        void CollectDescendants(Guid parentId)
+        {
+            foreach (var n in allNotes.Where(n => n.ParentNoteId == parentId))
+            {
+                if (toDelete.Add(n.Id))
+                    CollectDescendants(n.Id);
+            }
+        }
+
+        foreach (var id in request.NoteIds)
+        {
+            if (!allIds.Contains(id)) continue;
+            toDelete.Add(id);
+            CollectDescendants(id);
+        }
+
+        var items = allNotes
+            .Where(n => toDelete.Contains(n.Id))
+            .Select(n => new DeletePreviewItem(
+                n.Id,
+                n.Title,
+                n.Depth,
+                allNotes.Count(c => c.ParentNoteId == n.Id)))
+            .ToList();
+
+        return Results.Ok(new DeletePreviewResponse(items, items.Count));
+    }
+
+    /// <summary>
+    /// POST /api/v1/notes/delete-recursive
+    /// Body: { noteIds: [...] }
+    /// Exclui as notas e todas as suas sub-notas recursivamente (filhas primeiro, pai por último).
+    /// </summary>
+    private static async Task<IResult> DeleteRecursive(
+        BatchDeleteRequest request,
+        ClaimsPrincipal user,
+        SomeNoteTakingLlmDbContext db,
+        ChromaService chroma)
+    {
+        var ownerId = GetUserId(user);
+        var allNotes = await db.Notes
+            .Where(n => n.OwnerId == ownerId)
+            .ToListAsync();
+
+        var allIds = new HashSet<Guid>(allNotes.Select(n => n.Id));
+        var toDelete = new HashSet<Guid>();
+
+        void CollectDescendants(Guid parentId)
+        {
+            foreach (var n in allNotes.Where(n => n.ParentNoteId == parentId))
+            {
+                if (toDelete.Add(n.Id))
+                    CollectDescendants(n.Id);
+            }
+        }
+
+        foreach (var id in request.NoteIds)
+        {
+            if (!allIds.Contains(id)) continue;
+            toDelete.Add(id);
+            CollectDescendants(id);
+        }
+
+        // Ordena por depth decrescente (filhas primeiro)
+        var ordered = allNotes
+            .Where(n => toDelete.Contains(n.Id))
+            .OrderByDescending(n => n.Depth)
+            .ToList();
+
+        foreach (var note in ordered)
+        {
+            db.Notes.Remove(note);
+        }
+
+        await db.SaveChangesAsync();
+
+        foreach (var id in toDelete)
+            _ = Task.Run(() => chroma.DeleteNoteAsync(id));
+
+        return Results.Ok(new { deleted = ordered.Count });
+    }
+
+    /// <summary>
+    /// POST /api/v1/notes/batch-move
+    /// Body: { noteIds: [...], projectId?, parentNoteId? }
+    /// Move múltiplas notas para um projeto/pai.
+    /// </summary>
+    private static async Task<IResult> BatchMove(
+        BatchMoveRequest request,
+        ClaimsPrincipal user,
+        SomeNoteTakingLlmDbContext db)
+    {
+        var ownerId = GetUserId(user);
+        var notes = await db.Notes
+            .Where(n => n.OwnerId == ownerId && request.NoteIds.Contains(n.Id))
+            .ToListAsync();
+
+        foreach (var note in notes)
+        {
+            note.ProjectId = request.ProjectId;
+            note.ParentNoteId = request.ParentNoteId;
+            note.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
+        return Results.Ok(new { moved = notes.Count });
+    }
+
+    /// <summary>
+    /// POST /api/v1/notes/batch-tag
+    /// Body: { noteIds: [...], tags: [...] }
+    /// Substitui as tags de múltiplas notas (define o conjunto exato).
+    /// </summary>
+    private static async Task<IResult> BatchTag(
+        BatchTagRequest request,
+        ClaimsPrincipal user,
+        SomeNoteTakingLlmDbContext db)
+    {
+        var ownerId = GetUserId(user);
+        var notes = await db.Notes
+            .Where(n => n.OwnerId == ownerId && request.NoteIds.Contains(n.Id))
+            .Include(n => n.NoteTags)
+            .ToListAsync();
+
+        foreach (var note in notes)
+        {
+            await SetNoteTagsAsync(note, ownerId, request.Tags, db);
+            note.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
+        return Results.Ok(new { tagged = notes.Count });
     }
 }

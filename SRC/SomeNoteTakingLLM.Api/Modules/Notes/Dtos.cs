@@ -10,3 +10,21 @@ public sealed record NoteResponse(
     Guid Id, Guid OwnerId, Guid? ProjectId, Guid? ParentNoteId,
     string? Title, string? Content, DateTime? NoteDate, int Depth, NoteType NoteType, IReadOnlyList<string> Tags, IReadOnlyList<string> DirectTags,
     DateTime CreatedAt, DateTime UpdatedAt);
+
+// ── Batch / Hygiene ────────────────────────────────────────────────────────
+
+public sealed record BatchDeleteRequest(IReadOnlyList<Guid> NoteIds);
+public sealed record BatchMoveRequest(IReadOnlyList<Guid> NoteIds, Guid? ProjectId, Guid? ParentNoteId);
+public sealed record BatchTagRequest(IReadOnlyList<Guid> NoteIds, IReadOnlyList<string> Tags);
+
+public sealed record DeletePreviewResponse(
+    IReadOnlyList<DeletePreviewItem> Items,
+    int TotalCount
+);
+
+public sealed record DeletePreviewItem(
+    Guid Id,
+    string? Title,
+    int Depth,
+    int ChildCount
+);

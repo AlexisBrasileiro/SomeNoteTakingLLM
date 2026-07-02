@@ -167,6 +167,7 @@ export default function NotesPage() {
             <p style={styles.subtitle}>Busque por título, conteúdo, tag, data e projeto sem perder a hierarquia.</p>
           </div>
           <button style={styles.newBtn} onClick={() => navigate('/notes/new')}>+ Nova Nota</button>
+          <button style={{ ...styles.newBtn, background: '#7c3aed' }} onClick={() => navigate('/import')}>📦 Importar ZIP</button>
         </div>
 
         <div style={styles.filtersCard}>

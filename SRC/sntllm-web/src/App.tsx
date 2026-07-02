@@ -14,6 +14,8 @@ import ProjectsPage from './pages/ProjectsPage'
 import OnboardingPage from './pages/OnboardingPage'
 import SettingsPage from './pages/SettingsPage'
 import ChatPage from './pages/ChatPage'
+import ImportZipPage from './pages/ImportZipPage'
+import HygienePage from './pages/HygienePage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -61,6 +63,8 @@ function AppRoutes() {
         <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
         <Route path="/chat/new" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
         <Route path="/chat/:id" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
+        <Route path="/import" element={<ProtectedRoute><ImportZipPage /></ProtectedRoute>} />
+        <Route path="/hygiene" element={<ProtectedRoute><HygienePage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </SetupGuard>
